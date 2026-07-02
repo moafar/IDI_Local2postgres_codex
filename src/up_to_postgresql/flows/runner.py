@@ -68,8 +68,12 @@ def run_flow(config: FlowConfig) -> FlowRunResult:
     )
     duplicate_key, missing_duplicate_key_columns = _duplicate_key(validation, transformed)
     duplicate_rows = 0
-    if duplicate_key and not missing_duplicate_key_columns:
+    if missing_duplicate_key_columns:
+        duplicate_rows = 0
+    elif duplicate_key:
         duplicate_rows = int(transformed.duplicated(subset=duplicate_key, keep=False).sum())
+    else:
+        duplicate_rows = int(transformed.duplicated(keep=False).sum())
     _apply_duplicate_policy(validation, duplicate_rows, missing_duplicate_key_columns, warnings)
 
     output_dir = _output_base_dir(config)

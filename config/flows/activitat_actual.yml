@@ -1,0 +1,64 @@
+name: activitat_actual
+source:
+  type: csv
+  path: activitat_actual_2006-ene-may__.csv
+  encoding: utf-8
+  delimiter: ";"
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - Any prestació (YYYY)
+    - Centre SAP codi (Hospital)
+    - Centre SAP desc (Hospital)
+    - Data prestació
+    - Dia setmana prestació (desc)
+    - Hora prestació
+    - Institució
+    - Interlocutor/Metge sol·licitant codi (ordre)
+    - Interlocutor/Metge sol·licitant desc (ordre)
+    - Màquina de la prestació codi
+    - Màquina de la prestació desc
+    - Mes prestació (MM)
+    - Metge Radiologia Docum. Allibera codi
+    - Metge Radiologia Docum. Allibera desc
+    - Nivell 1 codi
+    - Nivell 1 desc
+    - Pacient (NHC)
+    - Prestació nivell 9 codi
+    - Prestació nivell 9 desc
+    - Servei sol·licitant codi (ordre)
+    - Servei sol·licitant desc (ordre)
+    - Tipus episodi codi
+    - UP sol·licitant codi
+    - UP sol·licitant desc
+    - UP sol·licitant entitat proveïdora codi
+    - UP sol·licitant entitat proveïdora desc
+    - UP sol·licitant tipus
+    - UT Gestora codi
+    - UT Gestora desc
+    - UT sol·licitant codi
+    - UT sol·licitant desc
+    - Número de prestacions
+    - Temps entre ordre clínica i data de prestació realitzada (dies)
+    - Temps entre ordre clínica i data de Realitazacio Informe (dies)
+    - Temps entre ordre clínica i data informe (dies)
+    - Temps entre prestació realitzada i data d'informe (dies)
+    - v_Centre Codi
+    - v_Direcció Clínica
+    - v_Institució corregida
+    - v_Màquina descripció
+    - v_Prestació descripció
+    - v_Resum Sol·licitant
+    - v_Torn
+    - v_UP Sol·licitant Corregida
+    - v_UP Sol·licitant Entitat Corregida
+    - v_UT Gestora corregida
+  missing_columns_policy: error
+  duplicate_policy: report
+output:
+  processed_filename: activitat_actual_processed.csv
+  report_filename: activitat_actual_report.json

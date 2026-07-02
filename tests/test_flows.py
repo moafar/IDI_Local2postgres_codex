@@ -167,6 +167,29 @@ def test_run_flow_warns_for_duplicates_policy_warning(tmp_path: Path) -> None:
     assert report["warnings"] == ["Duplicate rows found: 2"]
 
 
+def test_run_flow_reports_full_row_duplicates_without_duplicate_key(tmp_path: Path) -> None:
+    pytest.importorskip("pandas")
+    source = tmp_path / "input.csv"
+    source.write_text("id;name\n001;Ana\n001;Ana\n001;Bob\n", encoding="utf-8")
+    config = FlowConfig(
+        name="sample",
+        env="test",
+        data={
+            "paths": {"input_dir": str(tmp_path), "output_dir": str(tmp_path)},
+            "source": {"type": "csv", "path": "input.csv", "delimiter": ";"},
+            "validation": {"duplicate_policy": "report"},
+        },
+    )
+
+    result = run_flow(config)
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+
+    assert result.duplicate_key == ()
+    assert result.duplicate_rows == 2
+    assert report["duplicate_key"] == []
+    assert report["duplicate_rows"] == 2
+
+
 def test_llee_centreprova_reads_real_xlsx_and_writes_outputs(tmp_path: Path) -> None:
     pytest.importorskip("pandas")
     pytest.importorskip("openpyxl")
