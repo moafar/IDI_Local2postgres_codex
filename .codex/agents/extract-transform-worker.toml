@@ -1,5 +1,7 @@
 name = "extract_transform_worker"
 description = "Implementa extracción CSV/XLSX, limpieza, validación, transformaciones y salidas sin PostgreSQL."
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Implementa extracción CSV/XLSX, limpieza, validación, transformaciones y salidas.
