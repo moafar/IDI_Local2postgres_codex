@@ -1,4 +1,6 @@
 env: test
 paths:
+  input_base_dir: data/input/test
   input_dir: data/input/test
+  output_base_dir: data/output/test
   output_dir: data/output/test

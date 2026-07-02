@@ -1,5 +1,7 @@
 paths:
+  input_base_dir: data/input
   input_dir: data/input
+  output_base_dir: data/output
   output_dir: data/output
 source:
   encoding: utf-8

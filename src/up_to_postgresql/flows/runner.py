@@ -1,0 +1,264 @@
+# src/up_to_postgresql/flows/runner.py
+"""Run configured file-processing flows."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from up_to_postgresql.config.schema import FlowConfig
+from up_to_postgresql.readers import read_source
+
+
+class FlowRunError(ValueError):
+    """Raised when a configured flow cannot be executed."""
+
+
+@dataclass(frozen=True)
+class FlowRunResult:
+    flow: str
+    env: str
+    rows_read: int
+    columns_read: int
+    empty_rows_removed: int
+    empty_columns_removed: tuple[str, ...]
+    rows_written: int
+    columns_written: int
+    duplicate_rows: int
+    required_columns: tuple[str, ...]
+    transformations: tuple[str, ...]
+    processed_path: Path
+    report_path: Path
+
+
+def run_flow(config: FlowConfig) -> FlowRunResult:
+    frame = read_source(config)
+    processing = _processing(config)
+    cleaned = frame
+    if processing.get("drop_empty_rows", False) or processing.get(
+        "drop_empty_columns", False
+    ):
+        cleaned = _drop_empty(
+            cleaned,
+            drop_rows=bool(processing.get("drop_empty_rows", False)),
+            drop_columns=bool(processing.get("drop_empty_columns", False)),
+        )
+    empty_rows_removed = len(frame) - len(cleaned)
+    empty_columns_removed = tuple(
+        str(column) for column in frame.columns if column not in cleaned.columns
+    )
+    transformed = _apply_transformations(cleaned, config)
+    required_columns = tuple(_required_columns(config, transformed))
+    duplicate_key = _duplicate_key(processing, cleaned)
+    duplicate_rows = (
+        int(transformed.duplicated(subset=duplicate_key, keep=False).sum())
+        if processing.get("detect_duplicates", False)
+        else 0
+    )
+
+    output_dir = _output_base_dir(config)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    processed_path = output_dir / _output_name(
+        config, "processed_path", f"{config.name}_processed.csv"
+    )
+    report_path = output_dir / _output_name(
+        config, "report_path", f"{config.name}_report.json"
+    )
+
+    transformed.to_csv(processed_path, index=False, encoding="utf-8")
+    result = FlowRunResult(
+        flow=config.name,
+        env=config.env,
+        rows_read=len(frame),
+        columns_read=len(frame.columns),
+        empty_rows_removed=empty_rows_removed,
+        empty_columns_removed=empty_columns_removed,
+        rows_written=len(transformed),
+        columns_written=len(transformed.columns),
+        duplicate_rows=duplicate_rows,
+        required_columns=required_columns,
+        transformations=tuple(
+            transformation["name"] for transformation in _transformations(config)
+        ),
+        processed_path=processed_path,
+        report_path=report_path,
+    )
+    report_path.write_text(
+        json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
+def _drop_empty(
+    frame: pd.DataFrame, *, drop_rows: bool, drop_columns: bool
+) -> pd.DataFrame:
+    empty_marked = frame.replace(r"^\s*$", pd.NA, regex=True)
+    non_empty_rows = (
+        ~empty_marked.isna().all(axis=1)
+        if drop_rows
+        else pd.Series(True, index=frame.index)
+    )
+    non_empty_columns = (
+        ~empty_marked.isna().all(axis=0)
+        if drop_columns
+        else pd.Series(True, index=frame.columns)
+    )
+    return frame.loc[non_empty_rows, non_empty_columns].copy()
+
+
+def _apply_transformations(configured_frame: pd.DataFrame, config: FlowConfig) -> pd.DataFrame:
+    frame = configured_frame.copy()
+    for transformation in _transformations(config):
+        name = transformation["name"]
+        if name != "trim_strings":
+            raise FlowRunError(f"Unsupported transformation {name!r}.")
+        frame = _trim_strings(frame, transformation.get("columns"))
+    return frame
+
+
+def _transformations(config: FlowConfig) -> list[dict[str, Any]]:
+    raw_transformations = config.data.get("transformations", [])
+    if raw_transformations is None:
+        return []
+    if not isinstance(raw_transformations, list):
+        raise FlowRunError("Flow transformations must be a list when present.")
+    transformations: list[dict[str, Any]] = []
+    for transformation in raw_transformations:
+        if not isinstance(transformation, dict):
+            raise FlowRunError("Each flow transformation must be a mapping.")
+        name = transformation.get("name")
+        if not isinstance(name, str) or not name:
+            raise FlowRunError("Each flow transformation requires a name.")
+        transformations.append(transformation)
+    return transformations
+
+
+def _trim_strings(frame: pd.DataFrame, raw_columns: Any) -> pd.DataFrame:
+    columns = _selected_columns(frame, raw_columns)
+    trimmed = frame.copy()
+    for column in columns:
+        trimmed[column] = trimmed[column].fillna("").astype(str).str.strip()
+    return trimmed
+
+
+def _selected_columns(frame: pd.DataFrame, raw_columns: Any) -> list[str]:
+    if raw_columns in (None, "all"):
+        return [str(column) for column in frame.columns]
+    if not isinstance(raw_columns, list) or not all(
+        isinstance(column, str) and column for column in raw_columns
+    ):
+        raise FlowRunError("trim_strings.columns must be a list of columns or 'all'.")
+    missing = [column for column in raw_columns if column not in frame.columns]
+    if missing:
+        raise FlowRunError(f"trim_strings columns not found: {missing}")
+    return raw_columns
+
+
+def _processing(config: FlowConfig) -> dict[str, Any]:
+    processing = config.data.get("processing", {})
+    if processing is None:
+        return {}
+    if not isinstance(processing, dict):
+        raise FlowRunError("Flow processing must be a mapping when present.")
+    return processing
+
+
+def _required_columns(config: FlowConfig, frame: pd.DataFrame) -> list[str]:
+    validation = config.data.get("validation", {})
+    if validation is None:
+        return []
+    if not isinstance(validation, dict):
+        raise FlowRunError("Flow validation must be a mapping when present.")
+    raw_columns = validation.get("required_columns", [])
+    if raw_columns is None:
+        return []
+    if not isinstance(raw_columns, list) or not all(
+        isinstance(column, str) and column for column in raw_columns
+    ):
+        raise FlowRunError("Flow validation.required_columns must be a list of columns.")
+    missing = [column for column in raw_columns if column not in frame.columns]
+    if missing:
+        raise FlowRunError(f"Required columns not found: {missing}")
+    return raw_columns
+
+
+def _duplicate_key(processing: dict[str, Any], frame: pd.DataFrame) -> list[str] | None:
+    if not processing.get("detect_duplicates", False):
+        return None
+    raw_key = processing.get("duplicate_key")
+    if raw_key is None:
+        return None
+    if not isinstance(raw_key, list) or not all(
+        isinstance(column, str) and column for column in raw_key
+    ):
+        raise FlowRunError("Flow processing.duplicate_key must be a list of columns.")
+    missing = [column for column in raw_key if column not in frame.columns]
+    if missing:
+        raise FlowRunError(f"Duplicate key columns not found: {missing}")
+    return raw_key
+
+
+def _output_base_dir(config: FlowConfig) -> Path:
+    paths = config.data.get("paths", {})
+    if not isinstance(paths, dict):
+        raise FlowRunError("Flow paths must be a mapping.")
+    raw_output_dir = paths.get("output_base_dir", paths.get("output_dir"))
+    if not isinstance(raw_output_dir, str) or not raw_output_dir:
+        raise FlowRunError("Flow requires a non-empty paths.output_base_dir value.")
+    return Path(raw_output_dir)
+
+
+def _output_name(config: FlowConfig, key: str, default: str) -> Path:
+    output = config.data.get("output", {})
+    if output is None:
+        output = {}
+    if not isinstance(output, dict):
+        raise FlowRunError("Flow output must be a mapping when present.")
+    raw_path = output.get(key, default)
+    if not isinstance(raw_path, str) or not raw_path:
+        raise FlowRunError(f"Flow output.{key} must be a non-empty string.")
+    path = Path(raw_path)
+    if path.is_absolute():
+        raise FlowRunError(f"Flow output.{key} must be relative to output_base_dir.")
+    return path
+
+
+def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
+    source = config.data.get("source", {})
+    processing = _processing(config)
+    return {
+        "flow": result.flow,
+        "env": result.env,
+        "source": {
+            "type": source.get("type") if isinstance(source, dict) else None,
+            "path": source.get("path") if isinstance(source, dict) else None,
+            "sheet": source.get("sheet") if isinstance(source, dict) else None,
+            "header_row": source.get("header_row", 1) if isinstance(source, dict) else 1,
+        },
+        "rows_read": result.rows_read,
+        "columns_read": result.columns_read,
+        "empty_rows_removed": result.empty_rows_removed,
+        "empty_columns_removed": list(result.empty_columns_removed),
+        "rows_written": result.rows_written,
+        "columns_written": result.columns_written,
+        "required_columns": list(result.required_columns),
+        "transformations": list(result.transformations),
+        "duplicate_key": processing.get("duplicate_key"),
+        "duplicate_rows": result.duplicate_rows,
+        "processed_path": str(result.processed_path),
+        "report_path": str(result.report_path),
+        "steps": [
+            "read_source",
+            "drop_empty_rows",
+            "drop_empty_columns",
+            "detect_internal_duplicates",
+            "write_processed_output",
+            "write_execution_report",
+        ],
+        "postgresql": "not_implemented",
+    }

@@ -1,0 +1,38 @@
+name: llee_centreprova
+source:
+  type: xlsx
+  path: llee_mensual.xlsx
+  sheet: LLEE per Centre i Prova
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  detect_duplicates: true
+  duplicate_key:
+    - any
+    - mes
+    - Centre
+    - Proves
+validation:
+  required_columns:
+    - any
+    - mes
+    - Centre
+    - Proves
+    - Prestacions
+    - Pendents de programar
+    - % pendents programar
+    - Mes de 90 dies
+    - % mes 90 dies
+    - Entrades
+    - Sortides
+    - Diferència Entrades-Sortides
+    - Temps de demora (dies)
+    - Temps d'espera (dies)
+    - TD/TE (%)
+transformations:
+  - name: trim_strings
+    columns: all
+output:
+  processed_path: llee_centreprova_processed.csv
+  report_path: llee_centreprova_report.json
