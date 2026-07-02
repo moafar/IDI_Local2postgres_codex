@@ -1,0 +1,9 @@
+name = "extract_transform_worker"
+description = "Implementa extracción CSV/XLSX, limpieza, validación, transformaciones y salidas sin PostgreSQL."
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implementa extracción CSV/XLSX, limpieza, validación, transformaciones y salidas.
+Trabaja solo en los archivos asignados.
+No implementa PostgreSQL.
+Ejecuta pruebas relacionadas con sus cambios.
+"""
