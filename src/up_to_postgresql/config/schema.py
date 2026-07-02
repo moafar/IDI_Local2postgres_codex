@@ -5,12 +5,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 import re
 from typing import Any
 
 
 VALID_ENVS = ("test", "prd")
 VALID_SOURCE_TYPES = ("csv", "xlsx")
+VALID_POLICIES = ("error", "warning", "report")
 FLOW_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -61,22 +63,81 @@ def validate_flow_config(
         raise ConfigError("Flow configuration requires a string environment.")
     validate_env(resolved_env)
 
-    source = config.get("source")
-    if not isinstance(source, Mapping):
+    _validate_source(config.get("source"))
+    _validate_processing(config.get("processing", {}))
+    _validate_validation(config.get("validation", {}))
+    _validate_output(config.get("output", {}))
+    _validate_transformations(config.get("transformations", []))
+    return FlowConfig(name=name, env=resolved_env, data=dict(config))
+
+
+def _validate_source(value: Any) -> None:
+    if not isinstance(value, Mapping):
         raise ConfigError("Flow configuration requires a 'source' mapping.")
 
-    source_type = source.get("type")
+    source_type = value.get("type")
     if source_type not in VALID_SOURCE_TYPES:
         raise ConfigError(
             f"Invalid source.type {source_type!r}; expected one of {VALID_SOURCE_TYPES}."
         )
 
-    source_path = source.get("path")
+    source_path = value.get("path")
     if not isinstance(source_path, str) or not source_path:
         raise ConfigError("Flow source requires a non-empty string 'path'.")
 
-    _validate_transformations(config.get("transformations", []))
-    return FlowConfig(name=name, env=resolved_env, data=dict(config))
+    sheet = value.get("sheet")
+    if source_type == "xlsx" and (not isinstance(sheet, str) or not sheet):
+        raise ConfigError("XLSX sources require a non-empty string 'source.sheet'.")
+    if source_type == "csv" and sheet is not None:
+        raise ConfigError("CSV sources do not support 'source.sheet'.")
+
+    _positive_integer(value.get("header_row", 1), "source.header_row")
+
+
+def _validate_processing(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise ConfigError("'processing' must be a mapping when present.")
+    _optional_bool(value, "drop_empty_rows", "processing.drop_empty_rows")
+    _optional_bool(value, "drop_empty_columns", "processing.drop_empty_columns")
+    trim_strings = value.get("trim_strings")
+    if trim_strings is not None and not (
+        isinstance(trim_strings, bool)
+        or trim_strings == "all"
+        or (
+            isinstance(trim_strings, Sequence)
+            and not isinstance(trim_strings, (str, bytes))
+            and all(isinstance(column, str) and column for column in trim_strings)
+        )
+    ):
+        raise ConfigError(
+            "'processing.trim_strings' must be a boolean, 'all', or a list of column names."
+        )
+
+
+def _validate_validation(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise ConfigError("'validation' must be a mapping when present.")
+    _optional_string_list(value, "required_columns", "validation.required_columns")
+    _optional_string_list(value, "duplicate_key", "validation.duplicate_key")
+    _optional_policy(value, "missing_columns_policy", "validation.missing_columns_policy")
+    _optional_policy(value, "duplicate_policy", "validation.duplicate_policy")
+
+
+def _validate_output(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise ConfigError("'output' must be a mapping when present.")
+    for key in ("processed_filename", "report_filename"):
+        item = value.get(key)
+        if item is not None and (not isinstance(item, str) or not item):
+            raise ConfigError(f"'output.{key}' must be a non-empty string.")
+        if isinstance(item, str) and Path(item).is_absolute():
+            raise ConfigError(f"'output.{key}' must be relative to output_base_dir.")
 
 
 def _validate_transformations(value: Any) -> None:
@@ -90,3 +151,30 @@ def _validate_transformations(value: Any) -> None:
         name = item.get("name")
         if not isinstance(name, str) or not name:
             raise ConfigError("Each transformation requires a non-empty string 'name'.")
+
+
+def _optional_bool(value: Mapping[str, Any], key: str, label: str) -> None:
+    item = value.get(key)
+    if item is not None and not isinstance(item, bool):
+        raise ConfigError(f"'{label}' must be a boolean.")
+
+
+def _optional_policy(value: Mapping[str, Any], key: str, label: str) -> None:
+    item = value.get(key)
+    if item is not None and item not in VALID_POLICIES:
+        raise ConfigError(f"'{label}' must be one of {VALID_POLICIES}.")
+
+
+def _optional_string_list(value: Mapping[str, Any], key: str, label: str) -> None:
+    item = value.get(key)
+    if item is None:
+        return
+    if not isinstance(item, Sequence) or isinstance(item, (str, bytes)):
+        raise ConfigError(f"'{label}' must be a list of strings.")
+    if not all(isinstance(column, str) and column for column in item):
+        raise ConfigError(f"'{label}' must contain only non-empty strings.")
+
+
+def _positive_integer(value: Any, label: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ConfigError(f"'{label}' must be a positive integer.")

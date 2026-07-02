@@ -46,17 +46,19 @@ def test_llee_centreprova_config_points_to_real_sheet_and_outputs() -> None:
         "type": "xlsx",
         "path": "llee_mensual.xlsx",
         "sheet": SHEET_NAME,
-        "header_row": "1",
+        "header_row": 1,
     }
     assert config.data["processing"] == {
         "drop_empty_rows": True,
         "drop_empty_columns": True,
-        "detect_duplicates": True,
-        "duplicate_key": DUPLICATE_KEY,
+        "trim_strings": "all",
     }
+    assert config.data["validation"]["missing_columns_policy"] == "error"
+    assert config.data["validation"]["duplicate_key"] == DUPLICATE_KEY
+    assert config.data["validation"]["duplicate_policy"] == "report"
     assert config.data["output"] == {
-        "processed_path": "llee_centreprova_processed.csv",
-        "report_path": "llee_centreprova_report.json",
+        "processed_filename": "llee_centreprova_processed.csv",
+        "report_filename": "llee_centreprova_report.json",
     }
 
 

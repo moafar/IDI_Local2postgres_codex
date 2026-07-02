@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 import copy
+import re
 import shlex
 from typing import Any
 
@@ -160,11 +161,14 @@ class _YamlSubsetParser:
             return raw_value == "true"
         if raw_value in ("null", "~"):
             return None
+        if re.fullmatch(r"-?[0-9]+", raw_value):
+            return int(raw_value)
         if raw_value.startswith(('"', "'")):
             try:
-                return shlex.split(raw_value)[0]
+                parsed = shlex.split(raw_value)
             except ValueError as error:
                 raise YamlSubsetError(f"{self.path}:{line_number}: {error}") from error
+            return parsed[0] if parsed else ""
         return raw_value
 
     def _looks_like_mapping_item(self, item: str) -> bool:

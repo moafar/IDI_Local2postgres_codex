@@ -33,7 +33,7 @@ def test_llee_centreprova_reads_real_file_and_writes_outputs(tmp_path: Path) -> 
 
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["source"]["sheet"] == "LLEE per Centre i Prova"
-    assert report["source"]["header_row"] == "1"
+    assert report["source"]["header_row"] == 1
     assert report["duplicate_key"] == ["any", "mes", "Centre", "Proves"]
     assert report["duplicate_rows"] == 0
     assert report["postgresql"] == "not_implemented"
@@ -77,8 +77,10 @@ def test_flow_drops_empty_rows_and_columns_and_detects_duplicates(
             "processing": {
                 "drop_empty_rows": True,
                 "drop_empty_columns": True,
-                "detect_duplicates": True,
+            },
+            "validation": {
                 "duplicate_key": ["any", "mes", "Centre", "Proves"],
+                "duplicate_policy": "report",
             },
         },
     )

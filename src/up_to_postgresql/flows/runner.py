@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,10 @@ import pandas as pd
 
 from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.readers import read_source
+
+
+LOGGER = logging.getLogger(__name__)
+VALID_POLICIES = ("error", "warning", "report")
 
 
 class FlowRunError(ValueError):
@@ -30,7 +35,11 @@ class FlowRunResult:
     columns_written: int
     duplicate_rows: int
     required_columns: tuple[str, ...]
+    missing_required_columns: tuple[str, ...]
+    duplicate_key: tuple[str, ...]
+    missing_duplicate_key_columns: tuple[str, ...]
     transformations: tuple[str, ...]
+    warnings: tuple[str, ...]
     processed_path: Path
     report_path: Path
 
@@ -52,21 +61,24 @@ def run_flow(config: FlowConfig) -> FlowRunResult:
         str(column) for column in frame.columns if column not in cleaned.columns
     )
     transformed = _apply_transformations(cleaned, config)
-    required_columns = tuple(_required_columns(config, transformed))
-    duplicate_key = _duplicate_key(processing, cleaned)
-    duplicate_rows = (
-        int(transformed.duplicated(subset=duplicate_key, keep=False).sum())
-        if processing.get("detect_duplicates", False)
-        else 0
+    validation = _validation(config)
+    warnings: list[str] = []
+    required_columns, missing_required_columns = _check_required_columns(
+        validation, transformed, warnings
     )
+    duplicate_key, missing_duplicate_key_columns = _duplicate_key(validation, transformed)
+    duplicate_rows = 0
+    if duplicate_key and not missing_duplicate_key_columns:
+        duplicate_rows = int(transformed.duplicated(subset=duplicate_key, keep=False).sum())
+    _apply_duplicate_policy(validation, duplicate_rows, missing_duplicate_key_columns, warnings)
 
     output_dir = _output_base_dir(config)
     output_dir.mkdir(parents=True, exist_ok=True)
     processed_path = output_dir / _output_name(
-        config, "processed_path", f"{config.name}_processed.csv"
+        config, "processed_filename", f"{config.name}_processed.csv"
     )
     report_path = output_dir / _output_name(
-        config, "report_path", f"{config.name}_report.json"
+        config, "report_filename", f"{config.name}_report.json"
     )
 
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
@@ -81,9 +93,11 @@ def run_flow(config: FlowConfig) -> FlowRunResult:
         columns_written=len(transformed.columns),
         duplicate_rows=duplicate_rows,
         required_columns=required_columns,
-        transformations=tuple(
-            transformation["name"] for transformation in _transformations(config)
-        ),
+        missing_required_columns=tuple(missing_required_columns),
+        duplicate_key=tuple(duplicate_key),
+        missing_duplicate_key_columns=tuple(missing_duplicate_key_columns),
+        transformations=_transformation_names(config),
+        warnings=tuple(warnings),
         processed_path=processed_path,
         report_path=report_path,
     )
@@ -113,6 +127,10 @@ def _drop_empty(
 
 def _apply_transformations(configured_frame: pd.DataFrame, config: FlowConfig) -> pd.DataFrame:
     frame = configured_frame.copy()
+    processing = _processing(config)
+    trim_strings = processing.get("trim_strings")
+    if trim_strings not in (None, False):
+        frame = _trim_strings(frame, "all" if trim_strings is True else trim_strings)
     for transformation in _transformations(config):
         name = transformation["name"]
         if name != "trim_strings":
@@ -136,6 +154,13 @@ def _transformations(config: FlowConfig) -> list[dict[str, Any]]:
             raise FlowRunError("Each flow transformation requires a name.")
         transformations.append(transformation)
     return transformations
+
+
+def _transformation_names(config: FlowConfig) -> tuple[str, ...]:
+    names = [transformation["name"] for transformation in _transformations(config)]
+    if _processing(config).get("trim_strings") not in (None, False):
+        names.insert(0, "trim_strings")
+    return tuple(names)
 
 
 def _trim_strings(frame: pd.DataFrame, raw_columns: Any) -> pd.DataFrame:
@@ -168,39 +193,75 @@ def _processing(config: FlowConfig) -> dict[str, Any]:
     return processing
 
 
-def _required_columns(config: FlowConfig, frame: pd.DataFrame) -> list[str]:
+def _validation(config: FlowConfig) -> dict[str, Any]:
     validation = config.data.get("validation", {})
     if validation is None:
-        return []
+        return {}
     if not isinstance(validation, dict):
         raise FlowRunError("Flow validation must be a mapping when present.")
+    return validation
+
+
+def _check_required_columns(
+    validation: dict[str, Any], frame: pd.DataFrame, warnings: list[str]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     raw_columns = validation.get("required_columns", [])
     if raw_columns is None:
-        return []
+        return (), ()
     if not isinstance(raw_columns, list) or not all(
         isinstance(column, str) and column for column in raw_columns
     ):
         raise FlowRunError("Flow validation.required_columns must be a list of columns.")
     missing = [column for column in raw_columns if column not in frame.columns]
     if missing:
-        raise FlowRunError(f"Required columns not found: {missing}")
-    return raw_columns
+        message = f"Required columns not found: {missing}"
+        _apply_policy(
+            validation.get("missing_columns_policy", "error"),
+            message,
+            warnings,
+        )
+    return tuple(raw_columns), tuple(missing)
 
 
-def _duplicate_key(processing: dict[str, Any], frame: pd.DataFrame) -> list[str] | None:
-    if not processing.get("detect_duplicates", False):
-        return None
-    raw_key = processing.get("duplicate_key")
+def _duplicate_key(
+    validation: dict[str, Any], frame: pd.DataFrame
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    raw_key = validation.get("duplicate_key")
     if raw_key is None:
-        return None
+        return (), ()
     if not isinstance(raw_key, list) or not all(
         isinstance(column, str) and column for column in raw_key
     ):
-        raise FlowRunError("Flow processing.duplicate_key must be a list of columns.")
+        raise FlowRunError("Flow validation.duplicate_key must be a list of columns.")
     missing = [column for column in raw_key if column not in frame.columns]
-    if missing:
-        raise FlowRunError(f"Duplicate key columns not found: {missing}")
-    return raw_key
+    return tuple(raw_key), tuple(missing)
+
+
+def _apply_duplicate_policy(
+    validation: dict[str, Any],
+    duplicate_rows: int,
+    missing_key_columns: tuple[str, ...],
+    warnings: list[str],
+) -> None:
+    policy = validation.get("duplicate_policy", "report")
+    if missing_key_columns:
+        _apply_policy(
+            validation.get("missing_columns_policy", "error"),
+            f"Duplicate key columns not found: {list(missing_key_columns)}",
+            warnings,
+        )
+    if duplicate_rows:
+        _apply_policy(policy, f"Duplicate rows found: {duplicate_rows}", warnings)
+
+
+def _apply_policy(policy: str, message: str, warnings: list[str]) -> None:
+    if policy not in VALID_POLICIES:
+        raise FlowRunError(f"Validation policy must be one of {VALID_POLICIES}.")
+    if policy == "error":
+        raise FlowRunError(message)
+    if policy == "warning":
+        LOGGER.warning(message)
+        warnings.append(message)
 
 
 def _output_base_dir(config: FlowConfig) -> Path:
@@ -219,7 +280,8 @@ def _output_name(config: FlowConfig, key: str, default: str) -> Path:
         output = {}
     if not isinstance(output, dict):
         raise FlowRunError("Flow output must be a mapping when present.")
-    raw_path = output.get(key, default)
+    legacy_key = key.replace("_filename", "_path")
+    raw_path = output.get(key, output.get(legacy_key, default))
     if not isinstance(raw_path, str) or not raw_path:
         raise FlowRunError(f"Flow output.{key} must be a non-empty string.")
     path = Path(raw_path)
@@ -230,7 +292,7 @@ def _output_name(config: FlowConfig, key: str, default: str) -> Path:
 
 def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
     source = config.data.get("source", {})
-    processing = _processing(config)
+    validation = _validation(config)
     return {
         "flow": result.flow,
         "env": result.env,
@@ -247,9 +309,16 @@ def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
         "rows_written": result.rows_written,
         "columns_written": result.columns_written,
         "required_columns": list(result.required_columns),
+        "missing_required_columns": list(result.missing_required_columns),
         "transformations": list(result.transformations),
-        "duplicate_key": processing.get("duplicate_key"),
+        "duplicate_key": list(result.duplicate_key),
+        "missing_duplicate_key_columns": list(result.missing_duplicate_key_columns),
         "duplicate_rows": result.duplicate_rows,
+        "policies": {
+            "missing_columns": validation.get("missing_columns_policy", "error"),
+            "duplicates": validation.get("duplicate_policy", "report"),
+        },
+        "warnings": list(result.warnings),
         "processed_path": str(result.processed_path),
         "report_path": str(result.report_path),
         "steps": [

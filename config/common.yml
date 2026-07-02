@@ -6,4 +6,11 @@ paths:
 source:
   encoding: utf-8
   delimiter: ","
+processing:
+  drop_empty_rows: false
+  drop_empty_columns: false
+  trim_strings: false
+validation:
+  missing_columns_policy: error
+  duplicate_policy: report
 transformations: []

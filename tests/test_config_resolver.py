@@ -87,6 +87,126 @@ source:
         resolve_flow_config("clientes", "test", config_dir=tmp_path)
 
 
+def test_resolver_validates_xlsx_sheet_and_header_row(tmp_path: Path) -> None:
+    write(tmp_path / "common.yml", "{}\n")
+    write(tmp_path / "env" / "test.yml", "env: test\n")
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: xlsx
+  path: clientes.xlsx
+  header_row: 0
+""",
+    )
+
+    with pytest.raises(ConfigError, match="source.sheet"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: xlsx
+  path: clientes.xlsx
+  sheet: datos
+  header_row: 0
+""",
+    )
+
+    with pytest.raises(ConfigError, match="source.header_row"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+
+def test_resolver_validates_processing_validation_and_output(tmp_path: Path) -> None:
+    write(tmp_path / "common.yml", "{}\n")
+    write(tmp_path / "env" / "test.yml", "env: test\n")
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: csv
+  path: clientes.csv
+processing:
+  drop_empty_rows: yes
+validation:
+  required_columns:
+    - id
+  missing_columns_policy: stop
+output:
+  processed_filename: ""
+""",
+    )
+
+    with pytest.raises(ConfigError, match="processing.drop_empty_rows"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: csv
+  path: clientes.csv
+processing:
+  drop_empty_rows: true
+validation:
+  missing_columns_policy: stop
+""",
+    )
+
+    with pytest.raises(ConfigError, match="missing_columns_policy"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: csv
+  path: clientes.csv
+processing:
+  trim_strings: 1
+""",
+    )
+
+    with pytest.raises(ConfigError, match="processing.trim_strings"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: csv
+  path: clientes.csv
+validation:
+  duplicate_key: id
+""",
+    )
+
+    with pytest.raises(ConfigError, match="validation.duplicate_key"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+source:
+  type: csv
+  path: clientes.csv
+output:
+  processed_filename: []
+""",
+    )
+
+    with pytest.raises(ConfigError, match="output.processed_filename"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+
 def test_resolver_rejects_non_declarative_transformations(tmp_path: Path) -> None:
     write(tmp_path / "common.yml", "{}\n")
     write(tmp_path / "env" / "test.yml", "env: test\n")

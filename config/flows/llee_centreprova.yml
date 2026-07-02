@@ -7,12 +7,7 @@ source:
 processing:
   drop_empty_rows: true
   drop_empty_columns: true
-  detect_duplicates: true
-  duplicate_key:
-    - any
-    - mes
-    - Centre
-    - Proves
+  trim_strings: all
 validation:
   required_columns:
     - any
@@ -30,9 +25,13 @@ validation:
     - Temps de demora (dies)
     - Temps d'espera (dies)
     - TD/TE (%)
-transformations:
-  - name: trim_strings
-    columns: all
+  missing_columns_policy: error
+  duplicate_key:
+    - any
+    - mes
+    - Centre
+    - Proves
+  duplicate_policy: report
 output:
-  processed_path: llee_centreprova_processed.csv
-  report_path: llee_centreprova_report.json
+  processed_filename: llee_centreprova_processed.csv
+  report_filename: llee_centreprova_report.json
