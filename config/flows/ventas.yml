@@ -1,0 +1,9 @@
+name: ventas
+source:
+  type: xlsx
+  path: ventas.xlsx
+  sheet: ventas
+validation:
+  required_columns:
+    - id
+    - total

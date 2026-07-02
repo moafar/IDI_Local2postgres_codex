@@ -1,0 +1,7 @@
+paths:
+  input_dir: data/input
+  output_dir: data/output
+source:
+  encoding: utf-8
+  delimiter: ","
+transformations: []

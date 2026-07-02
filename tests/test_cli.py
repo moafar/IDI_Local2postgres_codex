@@ -1,3 +1,6 @@
+# tests/test_cli.py
+"""Tests for the command line interface."""
+
 import pytest
 
 from up_to_postgresql.cli import main
@@ -47,4 +50,3 @@ def test_cli_shows_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Run a configured data flow." in captured.out
     assert "--flow" in captured.out
     assert "--env" in captured.out
-

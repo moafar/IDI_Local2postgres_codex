@@ -1,0 +1,4 @@
+env: test
+paths:
+  input_dir: data/input/test
+  output_dir: data/output/test

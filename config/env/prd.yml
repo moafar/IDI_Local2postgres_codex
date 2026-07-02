@@ -1,0 +1,4 @@
+env: prd
+paths:
+  input_dir: data/input/prd
+  output_dir: data/output/prd
