@@ -1,0 +1,73 @@
+name: td_ambulatoris
+source:
+  type: xlsx
+  path: td.xlsx
+  sheet: td_ambulatoris
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - any
+    - mes
+    - centre_realitzacio
+    - sala_realitzacio
+    - data_realitzacio
+    - dies_previstos
+    - data_conveni
+    - prestacio_modalitat
+    - pte_num
+    - prestacio_denominacio
+    - especialista
+    - situacio
+    - data_resultats
+    - pte_cip
+    - data_assignacio
+    - dias_trigats
+    - dias_retard
+  missing_columns_policy: error
+  duplicate_policy: report
+output:
+  processed_filename: td_ambulatoris_processed.csv
+  report_filename: td_ambulatoris_report.json
+load:
+  target_table: td_ambulatoris
+  load_mode: fail
+  reload_existing_hash: false
+  column_mapping:
+    - source: any
+      target: any_ambulatoris
+    - source: mes
+      target: mes_ambulatoris
+    - source: centre_realitzacio
+      target: centre_realitzacio
+    - source: sala_realitzacio
+      target: sala_realitzacio
+    - source: data_realitzacio
+      target: data_realitzacio
+    - source: dies_previstos
+      target: dies_previstos
+    - source: data_conveni
+      target: data_conveni
+    - source: prestacio_modalitat
+      target: prestacio_modalitat
+    - source: pte_num
+      target: pacient_numero
+    - source: prestacio_denominacio
+      target: prestacio_denominacio
+    - source: especialista
+      target: especialista
+    - source: situacio
+      target: situacio
+    - source: data_resultats
+      target: data_resultats
+    - source: pte_cip
+      target: pacient_cip
+    - source: data_assignacio
+      target: data_assignacio
+    - source: dias_trigats
+      target: dies_trigats
+    - source: dias_retard
+      target: dies_retard

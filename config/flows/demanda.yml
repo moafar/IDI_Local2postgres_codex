@@ -1,0 +1,95 @@
+name: demanda
+source:
+  type: xlsx
+  path: demanda._samplexlsx.xlsx
+  sheet: Demanda
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - Any prestació (YYYY)
+    - Mes prestació (MM)
+    - Data prestació
+    - Número de prestacions
+    - Centre SAP codi (Hospital)
+    - Centre Codi
+    - Institució
+    - Institució corregida
+    - Màquina de la prestació codi
+    - Màquina de la prestació desc
+    - Màquina Descripció
+    - Prestació descripció
+    - Prestació nivell 9 codi
+    - Prestació nivell 9 desc
+    - Nivell 1 codi
+    - Nivell 1 desc
+    - UP sol·licitant desc
+    - UP sol·licitant entitat proveïdora desc
+    - UP Sol·licitant Corregida
+    - UP Sol·licitant Entitat Corregida
+    - UT sol·licitant desc
+    - Prestació estat codi
+    - Pacient (NHC)
+  missing_columns_policy: error
+  duplicate_key:
+    - Data prestació
+    - Prestació nivell 9 codi
+    - Pacient (NHC)
+  duplicate_policy: report
+output:
+  processed_filename: demanda_processed.csv
+  report_filename: demanda_report.json
+load:
+  target_table: demanda
+  load_mode: fail
+  reload_existing_hash: false
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio
+    - source: Mes prestació (MM)
+      target: mes_prestacio
+    - source: Data prestació
+      target: data_prestacio
+    - source: Número de prestacions
+      target: numero_prestacions
+    - source: Centre SAP codi (Hospital)
+      target: centre_sap_codi
+    - source: Centre Codi
+      target: centre_codi
+    - source: Institució
+      target: institucio
+    - source: Institució corregida
+      target: institucio_corregida
+    - source: Màquina de la prestació codi
+      target: maquina_prestacio_codi
+    - source: Màquina de la prestació desc
+      target: maquina_prestacio_descripcio
+    - source: Màquina Descripció
+      target: maquina_descripcio
+    - source: Prestació descripció
+      target: prestacio_descripcio
+    - source: Prestació nivell 9 codi
+      target: prestacio_nivell_9_codi
+    - source: Prestació nivell 9 desc
+      target: prestacio_nivell_9_descripcio
+    - source: Nivell 1 codi
+      target: nivell_1_codi
+    - source: Nivell 1 desc
+      target: nivell_1_descripcio
+    - source: UP sol·licitant desc
+      target: up_solicitant_descripcio
+    - source: UP sol·licitant entitat proveïdora desc
+      target: up_solicitant_entitat_proveidora_descripcio
+    - source: UP Sol·licitant Corregida
+      target: up_solicitant_corregida
+    - source: UP Sol·licitant Entitat Corregida
+      target: up_solicitant_entitat_corregida
+    - source: UT sol·licitant desc
+      target: ut_solicitant_descripcio
+    - source: Prestació estat codi
+      target: prestacio_estat_codi
+    - source: Pacient (NHC)
+      target: pacient_nhc

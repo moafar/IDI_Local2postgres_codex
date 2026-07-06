@@ -1,0 +1,73 @@
+name: llee_trams_demora
+source:
+  type: xlsx
+  path: llee_mensual.xlsx
+  sheet: Trams demora per Centre i Prova
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - any
+    - mes
+    - Centre
+    - Prioritat
+    - Grup de monitorització
+    - Total pacients
+    - porc_oportunidad
+    - 0-30 d
+    - 31-60 d
+    - 61-90 d
+    - 91-120 d
+    - 121-150 d
+    - 151-180 d
+    - 181-365 d
+    - Mes d'1 any
+  missing_columns_policy: error
+  duplicate_key:
+    - any
+    - mes
+    - Centre
+    - Prioritat
+    - Grup de monitorització
+  duplicate_policy: report
+output:
+  processed_filename: llee_trams_demora_processed.csv
+  report_filename: llee_trams_demora_report.json
+load:
+  target_table: llee_trams_demora
+  load_mode: fail
+  reload_existing_hash: false
+  column_mapping:
+    - source: any
+      target: any_llee
+    - source: mes
+      target: mes_llee
+    - source: Centre
+      target: centre
+    - source: Prioritat
+      target: prioritat
+    - source: Grup de monitorització
+      target: grup_monitoritzacio
+    - source: Total pacients
+      target: total_pacients
+    - source: porc_oportunidad
+      target: percentatge_oportunitat
+    - source: 0-30 d
+      target: tram_0_30_dies
+    - source: 31-60 d
+      target: tram_31_60_dies
+    - source: 61-90 d
+      target: tram_61_90_dies
+    - source: 91-120 d
+      target: tram_91_120_dies
+    - source: 121-150 d
+      target: tram_121_150_dies
+    - source: 151-180 d
+      target: tram_151_180_dies
+    - source: 181-365 d
+      target: tram_181_365_dies
+    - source: Mes d'1 any
+      target: mes_1_any

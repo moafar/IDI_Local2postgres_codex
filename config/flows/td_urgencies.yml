@@ -1,0 +1,52 @@
+name: td_urgencies
+source:
+  type: xlsx
+  path: td.xlsx
+  sheet: td_urgencies
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - solicitant
+    - any
+    - mes
+    - episodi
+    - prestació
+    - proves
+    - lat
+    - lon
+  missing_columns_policy: error
+  duplicate_key:
+    - solicitant
+    - any
+    - mes
+    - episodi
+    - prestació
+  duplicate_policy: report
+output:
+  processed_filename: td_urgencies_processed.csv
+  report_filename: td_urgencies_report.json
+load:
+  target_table: td_urgencies
+  load_mode: fail
+  reload_existing_hash: false
+  column_mapping:
+    - source: solicitant
+      target: solicitant
+    - source: any
+      target: any_urgencies
+    - source: mes
+      target: mes_urgencies
+    - source: episodi
+      target: episodi
+    - source: prestació
+      target: prestacio
+    - source: proves
+      target: proves
+    - source: lat
+      target: latitud
+    - source: lon
+      target: longitud
