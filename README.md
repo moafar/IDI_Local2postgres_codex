@@ -38,3 +38,11 @@ la hoja `LLEE per Centre i Prova`, la fila de encabezado, texto, ausencia de
 filas/columnas completamente vacías, duplicados internos, salida procesada y
 reporte. PostgreSQL queda fuera del alcance actual y se reporta como
 `not_implemented`.
+
+## PostgreSQL
+
+El contrato físico objetivo para la futura carga PostgreSQL está documentado en:
+
+- `docs/postgresql_mapping.md`
+
+Ese documento fija la correspondencia entre columnas de origen y columnas físicas PostgreSQL para las tablas ya creadas en los esquemas `test` y `prd`.
