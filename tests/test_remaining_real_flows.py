@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
 
 from up_to_postgresql.config.resolver import resolve_flow_config
+from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.flows import run_flow
 from up_to_postgresql.readers import read_source
 
@@ -112,10 +114,19 @@ FLOW_CASES = {
     "td_urgencies": {
         "source": "td.xlsx",
         "sheet": "td_urgencies",
-        "shape": (588, 8),
+        "shape": (588, 6),
+        "source_shape": (588, 8),
         "target_table": "td_urgencies",
         "load_mode": "append",
         "columns": [
+            "solicitant",
+            "any",
+            "mes",
+            "episodi",
+            "prestació",
+            "proves",
+        ],
+        "source_columns": [
             "solicitant",
             "any",
             "mes",
@@ -134,8 +145,6 @@ FLOW_CASES = {
             "episodi",
             "prestacio",
             "proves",
-            "latitud",
-            "longitud",
         ],
     },
     "demanda": {
@@ -246,13 +255,15 @@ def test_remaining_real_flow_reads_expected_xlsx_columns(flow_name: str) -> None
     pytest.importorskip("pandas")
     pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
+    source_shape = case.get("source_shape", case["shape"])
+    source_columns = case.get("source_columns", case["columns"])
     source = Path("data/input/test") / str(case["source"])
     assert source.exists(), f"Missing real fixture: {source}"
 
     frame = read_source(resolve_flow_config(flow_name, "test"))
 
-    assert frame.shape == case["shape"]
-    assert list(frame.columns) == case["columns"]
+    assert frame.shape == source_shape
+    assert list(frame.columns) == source_columns
 
 
 @pytest.mark.parametrize("flow_name", FLOW_CASES)
@@ -262,17 +273,18 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     pytest.importorskip("pandas")
     pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
+    source_shape = case.get("source_shape", case["shape"])
     config = resolve_flow_config(flow_name, "test")
     config.data["paths"]["output_base_dir"] = str(tmp_path)
 
     result = run_flow(config)
 
-    assert result.rows_read == case["shape"][0]
-    assert result.columns_read == case["shape"][1]
+    assert result.rows_read == source_shape[0]
+    assert result.columns_read == source_shape[1]
     assert result.rows_written == case["shape"][0]
     assert result.columns_written == case["shape"][1]
     assert result.empty_rows_removed == 0
-    assert result.empty_columns_removed == ()
+    assert result.empty_columns_removed == tuple(case.get("empty_columns_removed", []))
     assert result.duplicate_rows == case["duplicate_rows"]
     assert result.processed_path.exists()
     assert result.report_path.exists()
@@ -281,3 +293,59 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     assert report["duplicate_key"] == case["duplicate_key"]
     assert report["duplicate_rows"] == case["duplicate_rows"]
     assert report["postgresql"] == {"status": "skipped"}
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        (
+            "td_urgencies_with_empty_lat_lon.csv",
+            (
+                "solicitant,any,mes,episodi,prestació,proves,lat,lon\n"
+                "Hospital A,2026,05,E-1,RX,2,,\n"
+            ),
+        ),
+        (
+            "td_urgencies_without_lat_lon.csv",
+            (
+                "solicitant,any,mes,episodi,prestació,proves\n"
+                "Hospital A,2026,05,E-1,RX,2\n"
+            ),
+        ),
+    ],
+)
+def test_td_urgencies_processes_sources_with_or_without_lat_lon(
+    tmp_path: Path, filename: str, content: str
+) -> None:
+    pytest.importorskip("pandas")
+    source = tmp_path / filename
+    source.write_text(content, encoding="utf-8")
+    resolved = resolve_flow_config("td_urgencies", "test")
+    data = copy.deepcopy(resolved.data)
+    data["paths"]["input_base_dir"] = str(tmp_path)
+    data["paths"]["output_base_dir"] = str(tmp_path / "output")
+    data["source"] = {
+        "type": "csv",
+        "path": filename,
+        "encoding": "utf-8",
+        "delimiter": ",",
+    }
+    config = FlowConfig(name=resolved.name, env=resolved.env, data=data)
+
+    result = run_flow(config)
+
+    assert result.missing_required_columns == ()
+    assert result.rows_written == 1
+    assert result.columns_written == 6
+    assert result.processed_path.read_text(encoding="utf-8").splitlines() == [
+        "solicitant,any,mes,episodi,prestació,proves",
+        "Hospital A,2026,05,E-1,RX,2",
+    ]
+    assert [item["source"] for item in config.data["load"]["column_mapping"]] == [
+        "solicitant",
+        "any",
+        "mes",
+        "episodi",
+        "prestació",
+        "proves",
+    ]

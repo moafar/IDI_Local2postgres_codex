@@ -75,7 +75,7 @@ def run_flow(
     empty_columns_removed = tuple(
         str(column) for column in frame.columns if column not in cleaned.columns
     )
-    transformed = _apply_transformations(cleaned, config)
+    transformed = _project_mapped_columns(_apply_transformations(cleaned, config), config)
     validation = _validation(config)
     warnings: list[str] = []
     required_columns, missing_required_columns = _check_required_columns(
@@ -167,6 +167,27 @@ def _apply_transformations(configured_frame: pd.DataFrame, config: FlowConfig) -
             raise FlowRunError(f"Unsupported transformation {name!r}.")
         frame = _trim_strings(frame, transformation.get("columns"))
     return frame
+
+
+def _project_mapped_columns(frame: pd.DataFrame, config: FlowConfig) -> pd.DataFrame:
+    load = config.data.get("load")
+    if not isinstance(load, dict):
+        return frame
+    raw_mapping = load.get("column_mapping")
+    if not isinstance(raw_mapping, list):
+        return frame
+    columns: list[str] = []
+    for item in raw_mapping:
+        if not isinstance(item, dict):
+            return frame
+        source = item.get("source")
+        if not isinstance(source, str) or not source:
+            return frame
+        if source not in columns:
+            columns.append(source)
+    if not columns or any(column not in frame.columns for column in columns):
+        return frame
+    return frame.loc[:, columns].copy()
 
 
 def _transformations(config: FlowConfig) -> list[dict[str, Any]]:

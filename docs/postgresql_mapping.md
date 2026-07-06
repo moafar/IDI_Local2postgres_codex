@@ -214,8 +214,6 @@ Hoja td_urgencies.
 | 4 | `episodi` | `episodi` | `TEXT` |
 | 5 | `prestació` | `prestacio` | `TEXT` |
 | 6 | `proves` | `proves` | `TEXT` |
-| 7 | `lat` | `latitud` | `TEXT` |
-| 8 | `lon` | `longitud` | `TEXT` |
 
 ## Tabla técnica `load_control`
 

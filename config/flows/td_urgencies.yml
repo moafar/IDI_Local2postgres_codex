@@ -16,8 +16,6 @@ validation:
     - episodi
     - prestació
     - proves
-    - lat
-    - lon
   missing_columns_policy: error
   duplicate_key:
     - solicitant
@@ -46,7 +44,3 @@ load:
       target: prestacio
     - source: proves
       target: proves
-    - source: lat
-      target: latitud
-    - source: lon
-      target: longitud
