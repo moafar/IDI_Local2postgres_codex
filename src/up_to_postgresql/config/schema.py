@@ -13,7 +13,9 @@ from typing import Any
 VALID_ENVS = ("test", "prd")
 VALID_SOURCE_TYPES = ("csv", "xlsx")
 VALID_POLICIES = ("error", "warning", "report")
+VALID_LOAD_MODES = ("fail", "replace", "append")
 FLOW_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+IDENTIFIER_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 class ConfigError(ValueError):
@@ -68,6 +70,8 @@ def validate_flow_config(
     _validate_validation(config.get("validation", {}))
     _validate_output(config.get("output", {}))
     _validate_transformations(config.get("transformations", []))
+    _validate_postgresql(config.get("postgresql", {}), resolved_env)
+    _validate_load(config.get("load", {}))
     return FlowConfig(name=name, env=resolved_env, data=dict(config))
 
 
@@ -153,6 +157,56 @@ def _validate_transformations(value: Any) -> None:
             raise ConfigError("Each transformation requires a non-empty string 'name'.")
 
 
+def _validate_postgresql(value: Any, env: str) -> None:
+    if value is None or value == {}:
+        return
+    if not isinstance(value, Mapping):
+        raise ConfigError("'postgresql' must be a mapping when present.")
+    for key in ("host", "database", "user", "schema"):
+        item = value.get(key)
+        if not isinstance(item, str) or not item:
+            raise ConfigError(f"'postgresql.{key}' must be a non-empty string.")
+    if value.get("schema") != env:
+        raise ConfigError("'postgresql.schema' must match the selected environment.")
+    port = value.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or port < 1:
+        raise ConfigError("'postgresql.port' must be a positive integer.")
+    if "password" in value:
+        raise ConfigError("'postgresql.password' must not be stored in configuration.")
+
+
+def _validate_load(value: Any) -> None:
+    if value is None or value == {}:
+        return
+    if not isinstance(value, Mapping):
+        raise ConfigError("'load' must be a mapping when present.")
+    target_table = value.get("target_table")
+    if not _is_identifier(target_table):
+        raise ConfigError("'load.target_table' must be a PostgreSQL identifier.")
+    load_mode = value.get("load_mode")
+    if load_mode not in VALID_LOAD_MODES:
+        raise ConfigError(f"'load.load_mode' must be one of {VALID_LOAD_MODES}.")
+    reload_hash = value.get("reload_existing_hash")
+    if reload_hash is not None and not isinstance(reload_hash, bool):
+        raise ConfigError("'load.reload_existing_hash' must be a boolean.")
+    mapping = value.get("column_mapping")
+    if not isinstance(mapping, Sequence) or isinstance(mapping, (str, bytes)) or not mapping:
+        raise ConfigError("'load.column_mapping' must be a non-empty list.")
+    targets: list[str] = []
+    for item in mapping:
+        if not isinstance(item, Mapping):
+            raise ConfigError("Each load.column_mapping item must be a mapping.")
+        source = item.get("source")
+        target = item.get("target")
+        if not isinstance(source, str) or not source:
+            raise ConfigError("Each load.column_mapping item requires a source.")
+        if not _is_identifier(target):
+            raise ConfigError("Each load.column_mapping item requires a target identifier.")
+        targets.append(target)
+    if len(targets) != len(set(targets)):
+        raise ConfigError("'load.column_mapping' contains duplicate target columns.")
+
+
 def _optional_bool(value: Mapping[str, Any], key: str, label: str) -> None:
     item = value.get(key)
     if item is not None and not isinstance(item, bool):
@@ -178,3 +232,7 @@ def _optional_string_list(value: Mapping[str, Any], key: str, label: str) -> Non
 def _positive_integer(value: Any, label: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ConfigError(f"'{label}' must be a positive integer.")
+
+
+def _is_identifier(value: Any) -> bool:
+    return isinstance(value, str) and bool(IDENTIFIER_PATTERN.fullmatch(value))

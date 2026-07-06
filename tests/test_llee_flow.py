@@ -36,7 +36,7 @@ def test_llee_centreprova_reads_real_file_and_writes_outputs(tmp_path: Path) -> 
     assert report["source"]["header_row"] == 1
     assert report["duplicate_key"] == ["any", "mes", "Centre", "Proves"]
     assert report["duplicate_rows"] == 0
-    assert report["postgresql"] == "not_implemented"
+    assert report["postgresql"] == {"status": "skipped"}
 
 
 def test_flow_drops_empty_rows_and_columns_and_detects_duplicates(

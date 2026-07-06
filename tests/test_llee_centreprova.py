@@ -123,4 +123,4 @@ def test_llee_centreprova_processed_output_and_report_contract(tmp_path: Path) -
     assert report["rows_written"] == 252
     assert report["duplicate_key"] == DUPLICATE_KEY
     assert report["duplicate_rows"] == 0
-    assert report["postgresql"] == "not_implemented"
+    assert report["postgresql"] == {"status": "skipped"}

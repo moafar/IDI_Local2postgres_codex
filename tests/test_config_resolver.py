@@ -223,3 +223,54 @@ transformations: trim_strings
 
     with pytest.raises(ConfigError, match="transformations"):
         resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+
+def test_resolver_validates_postgresql_load_contract(tmp_path: Path) -> None:
+    write(
+        tmp_path / "common.yml",
+        """
+source:
+  type: csv
+  path: clientes.csv
+postgresql:
+  host: localhost
+  port: 5433
+  database: data_dbo_idi
+  user: rom
+  schema: test
+""",
+    )
+    write(tmp_path / "env" / "test.yml", "env: test\n")
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+load:
+  target_table: clientes
+  load_mode: merge
+  column_mapping:
+    - source: id
+      target: id
+""",
+    )
+
+    with pytest.raises(ConfigError, match="load.load_mode"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+    write(
+        tmp_path / "flows" / "clientes.yml",
+        """
+name: clientes
+load:
+  target_table: clientes
+  load_mode: append
+  column_mapping:
+    - source: id
+      target: id
+    - source: code
+      target: id
+""",
+    )
+
+    with pytest.raises(ConfigError, match="duplicate target"):
+        resolve_flow_config("clientes", "test", config_dir=tmp_path)

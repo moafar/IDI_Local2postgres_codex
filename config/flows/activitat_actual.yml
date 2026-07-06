@@ -62,3 +62,100 @@ validation:
 output:
   processed_filename: activitat_actual_processed.csv
   report_filename: activitat_actual_report.json
+load:
+  target_table: activitat_actual
+  load_mode: fail
+  reload_existing_hash: false
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio
+    - source: Centre SAP codi (Hospital)
+      target: centre_sap_codi
+    - source: Centre SAP desc (Hospital)
+      target: centre_sap_descripcio
+    - source: Data prestació
+      target: data_prestacio
+    - source: Dia setmana prestació (desc)
+      target: dia_setmana_prestacio
+    - source: Hora prestació
+      target: hora_prestacio
+    - source: Institució
+      target: institucio
+    - source: Interlocutor/Metge sol·licitant codi (ordre)
+      target: metge_solicitant_codi
+    - source: Interlocutor/Metge sol·licitant desc (ordre)
+      target: metge_solicitant_descripcio
+    - source: Màquina de la prestació codi
+      target: maquina_prestacio_codi
+    - source: Màquina de la prestació desc
+      target: maquina_prestacio_descripcio
+    - source: Mes prestació (MM)
+      target: mes_prestacio
+    - source: Metge Radiologia Docum. Allibera codi
+      target: metge_radiologia_allibera_codi
+    - source: Metge Radiologia Docum. Allibera desc
+      target: metge_radiologia_allibera_descripcio
+    - source: Nivell 1 codi
+      target: nivell_1_codi
+    - source: Nivell 1 desc
+      target: nivell_1_descripcio
+    - source: Pacient (NHC)
+      target: pacient_nhc
+    - source: Prestació nivell 9 codi
+      target: prestacio_nivell_9_codi
+    - source: Prestació nivell 9 desc
+      target: prestacio_nivell_9_descripcio
+    - source: Servei sol·licitant codi (ordre)
+      target: servei_solicitant_codi
+    - source: Servei sol·licitant desc (ordre)
+      target: servei_solicitant_descripcio
+    - source: Tipus episodi codi
+      target: tipus_episodi_codi
+    - source: UP sol·licitant codi
+      target: up_solicitant_codi
+    - source: UP sol·licitant desc
+      target: up_solicitant_descripcio
+    - source: UP sol·licitant entitat proveïdora codi
+      target: up_solicitant_entitat_proveidora_codi
+    - source: UP sol·licitant entitat proveïdora desc
+      target: up_solicitant_entitat_proveidora_descripcio
+    - source: UP sol·licitant tipus
+      target: up_solicitant_tipus
+    - source: UT Gestora codi
+      target: ut_gestora_codi
+    - source: UT Gestora desc
+      target: ut_gestora_descripcio
+    - source: UT sol·licitant codi
+      target: ut_solicitant_codi
+    - source: UT sol·licitant desc
+      target: ut_solicitant_descripcio
+    - source: Número de prestacions
+      target: numero_prestacions
+    - source: Temps entre ordre clínica i data de prestació realitzada (dies)
+      target: dies_ordre_a_prestacio_realitzada
+    - source: Temps entre ordre clínica i data de Realitazacio Informe (dies)
+      target: dies_ordre_a_realitzacio_informe
+    - source: Temps entre ordre clínica i data informe (dies)
+      target: dies_ordre_a_informe
+    - source: Temps entre prestació realitzada i data d'informe (dies)
+      target: dies_prestacio_realitzada_a_informe
+    - source: v_Centre Codi
+      target: centre_codi
+    - source: v_Direcció Clínica
+      target: direccio_clinica
+    - source: v_Institució corregida
+      target: institucio_corregida
+    - source: v_Màquina descripció
+      target: maquina_descripcio
+    - source: v_Prestació descripció
+      target: prestacio_descripcio
+    - source: v_Resum Sol·licitant
+      target: resum_solicitant
+    - source: v_Torn
+      target: torn
+    - source: v_UP Sol·licitant Corregida
+      target: up_solicitant_corregida
+    - source: v_UP Sol·licitant Entitat Corregida
+      target: up_solicitant_entitat_corregida
+    - source: v_UT Gestora corregida
+      target: ut_gestora_corregida

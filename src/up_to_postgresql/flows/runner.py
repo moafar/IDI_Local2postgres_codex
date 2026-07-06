@@ -12,6 +12,10 @@ from typing import Any
 import pandas as pd
 
 from up_to_postgresql.config.schema import FlowConfig
+from up_to_postgresql.loading import (
+    PostgresqlLoadResult,
+    load_to_postgresql,
+)
 from up_to_postgresql.readers import read_source
 
 
@@ -42,9 +46,17 @@ class FlowRunResult:
     warnings: tuple[str, ...]
     processed_path: Path
     report_path: Path
+    postgresql: PostgresqlLoadResult | None = None
 
 
-def run_flow(config: FlowConfig) -> FlowRunResult:
+def run_flow(
+    config: FlowConfig,
+    *,
+    load: bool = False,
+    connection_factory: Any | None = None,
+    password_provider: Any | None = None,
+    confirm_callback: Any | None = None,
+) -> FlowRunResult:
     frame = read_source(config)
     processing = _processing(config)
     cleaned = frame
@@ -86,6 +98,15 @@ def run_flow(config: FlowConfig) -> FlowRunResult:
     )
 
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
+    postgresql_result = None
+    if load:
+        postgresql_result = load_to_postgresql(
+            config,
+            transformed,
+            connection_factory=connection_factory,
+            password_provider=password_provider,
+            confirm_callback=confirm_callback,
+        )
     result = FlowRunResult(
         flow=config.name,
         env=config.env,
@@ -104,6 +125,7 @@ def run_flow(config: FlowConfig) -> FlowRunResult:
         warnings=tuple(warnings),
         processed_path=processed_path,
         report_path=report_path,
+        postgresql=postgresql_result,
     )
     report_path.write_text(
         json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
@@ -333,5 +355,19 @@ def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
             "write_processed_output",
             "write_execution_report",
         ],
-        "postgresql": "not_implemented",
+        "postgresql": _postgresql_report(result),
+    }
+
+
+def _postgresql_report(result: FlowRunResult) -> dict[str, Any]:
+    if result.postgresql is None:
+        return {"status": "skipped"}
+    return {
+        "status": result.postgresql.status,
+        "target_schema": result.postgresql.target_schema,
+        "target_table": result.postgresql.target_table,
+        "load_mode": result.postgresql.load_mode,
+        "source_filename": result.postgresql.source_filename,
+        "source_hash": result.postgresql.source_hash,
+        "rows_loaded": result.postgresql.rows_loaded,
     }

@@ -4,3 +4,9 @@ paths:
   input_dir: data/input/prd
   output_base_dir: data/output/prd
   output_dir: data/output/prd
+postgresql:
+  host: localhost
+  port: 5433
+  database: data_dbo_idi
+  user: rom
+  schema: prd

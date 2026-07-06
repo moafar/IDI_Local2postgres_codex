@@ -50,3 +50,28 @@ def test_cli_shows_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Run a configured data flow." in captured.out
     assert "--flow" in captured.out
     assert "--env" in captured.out
+
+
+def test_cli_execute_without_load_does_not_enable_postgresql(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = []
+
+    def fake_run_flow(config: object, *, load: bool = False) -> object:
+        calls.append(load)
+        return None
+
+    monkeypatch.setattr("up_to_postgresql.cli.run_flow", fake_run_flow)
+
+    exit_code = main(["--flow", "clientes", "--env", "test", "--execute"])
+
+    assert exit_code == 0
+    assert calls == [False]
+    assert "Type LOAD" not in capsys.readouterr().out
+
+
+def test_cli_rejects_load_without_execute() -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["--flow", "clientes", "--env", "test", "--load"])
+
+    assert error.value.code == 2

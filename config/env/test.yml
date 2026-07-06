@@ -4,3 +4,9 @@ paths:
   input_dir: data/input/test
   output_base_dir: data/output/test
   output_dir: data/output/test
+postgresql:
+  host: localhost
+  port: 5433
+  database: data_dbo_idi
+  user: rom
+  schema: test
