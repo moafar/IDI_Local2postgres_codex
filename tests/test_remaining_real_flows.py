@@ -214,10 +214,84 @@ FLOW_CASES = {
 }
 
 
+DEMANDA_SOURCE_COLUMNS = [
+    "Any prestació (YYYY)",
+    "Mes prestació (MM)",
+    "Data prestació",
+    "Número de prestacions",
+    "Centre SAP codi (Hospital)",
+    "Centre Codi",
+    "Institució",
+    "Institució corregida",
+    "Màquina de la prestació codi",
+    "Màquina de la prestació desc",
+    "Màquina Descripció",
+    "Prestació descripció",
+    "Prestació nivell 9 codi",
+    "Prestació nivell 9 desc",
+    "Nivell 1 codi",
+    "Nivell 1 desc",
+    "UP sol·licitant desc",
+    "UP sol·licitant entitat proveïdora desc",
+    "UP Sol·licitant Corregida",
+    "UP Sol·licitant Entitat Corregida",
+    "UT sol·licitant desc",
+    "Prestació estat codi",
+    "Pacient (NHC)",
+]
+
+
+def _build_demanda_xlsx(tmp_path: Path) -> Path:
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    source = tmp_path / "demanda_contract.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Demanda"
+
+    headers = [None, *DEMANDA_SOURCE_COLUMNS]
+    row = [
+        None,
+        "2026",
+        "01",
+        "2026-01-15",
+        "1",
+        "H01",
+        "C01",
+        "Institució A",
+        "Institució A corregida",
+        "MAC-01",
+        "Màquina A",
+        "Màquina A desc",
+        "Prestació A",
+        "P9-001",
+        "Prestació nivell 9 desc A",
+        "N1-001",
+        "Nivell 1 desc A",
+        "UP sol·licitant A",
+        "UP sol·licitant entitat proveïdora A",
+        "UP Sol·licitant Corregida A",
+        "UP Sol·licitant Entitat Corregida A",
+        "UT sol·licitant A",
+        "ESTAT",
+        "NHC-001",
+    ]
+
+    for column_index, value in enumerate(headers, start=1):
+        sheet.cell(row=2, column=column_index, value=value)
+    for column_index, value in enumerate(row, start=1):
+        sheet.cell(row=3, column=column_index, value=value)
+
+    workbook.save(source)
+    return source
+
+
 @pytest.mark.parametrize("flow_name", FLOW_CASES)
 def test_remaining_real_flow_config_contract(flow_name: str) -> None:
     case = FLOW_CASES[flow_name]
     config = resolve_flow_config(flow_name, "test")
+    expected_header_row = 2 if flow_name == "demanda" else 1
 
     assert config.data["source"] == {
         "encoding": "utf-8",
@@ -225,7 +299,7 @@ def test_remaining_real_flow_config_contract(flow_name: str) -> None:
         "type": "xlsx",
         "path": case["source"],
         "sheet": case["sheet"],
-        "header_row": 1,
+        "header_row": expected_header_row,
     }
     assert config.data["processing"] == {
         "drop_empty_rows": True,
@@ -251,16 +325,34 @@ def test_remaining_real_flow_config_contract(flow_name: str) -> None:
 
 
 @pytest.mark.parametrize("flow_name", FLOW_CASES)
-def test_remaining_real_flow_reads_expected_xlsx_columns(flow_name: str) -> None:
+def test_remaining_real_flow_reads_expected_xlsx_columns(
+    flow_name: str, tmp_path: Path
+) -> None:
     pytest.importorskip("pandas")
     pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
-    source_shape = case.get("source_shape", case["shape"])
-    source_columns = case.get("source_columns", case["columns"])
-    source = Path("data/input/test") / str(case["source"])
-    assert source.exists(), f"Missing real fixture: {source}"
+    config = resolve_flow_config(flow_name, "test")
 
-    frame = read_source(resolve_flow_config(flow_name, "test"))
+    if flow_name == "demanda":
+        source = _build_demanda_xlsx(tmp_path)
+        data = copy.deepcopy(config.data)
+        data["paths"]["input_base_dir"] = str(tmp_path)
+        data["source"] = {
+            "type": "xlsx",
+            "path": source.name,
+            "sheet": "Demanda",
+            "header_row": 2,
+        }
+        config = FlowConfig(name=config.name, env=config.env, data=data)
+        source_shape = (1, 24)
+        source_columns = ["Unnamed: 0", *DEMANDA_SOURCE_COLUMNS]
+    else:
+        source_shape = case.get("source_shape", case["shape"])
+        source_columns = case.get("source_columns", case["columns"])
+        source = Path("data/input/test") / str(case["source"])
+        assert source.exists(), f"Missing real fixture: {source}"
+
+    frame = read_source(config)
 
     assert frame.shape == source_shape
     assert list(frame.columns) == source_columns
@@ -274,17 +366,37 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
     source_shape = case.get("source_shape", case["shape"])
+    rows_written = case["shape"][0]
+    columns_written = case["shape"][1]
     config = resolve_flow_config(flow_name, "test")
+    if flow_name == "demanda":
+        source = _build_demanda_xlsx(tmp_path)
+        data = copy.deepcopy(config.data)
+        data["paths"]["input_base_dir"] = str(tmp_path)
+        data["paths"]["output_base_dir"] = str(tmp_path / "output")
+        data["source"] = {
+            "type": "xlsx",
+            "path": source.name,
+            "sheet": "Demanda",
+            "header_row": 2,
+        }
+        config = FlowConfig(name=config.name, env=config.env, data=data)
+        source_shape = (1, 24)
+        rows_written = 1
+        columns_written = 23
     config.data["paths"]["output_base_dir"] = str(tmp_path)
 
     result = run_flow(config)
 
     assert result.rows_read == source_shape[0]
     assert result.columns_read == source_shape[1]
-    assert result.rows_written == case["shape"][0]
-    assert result.columns_written == case["shape"][1]
+    assert result.rows_written == rows_written
+    assert result.columns_written == columns_written
     assert result.empty_rows_removed == 0
-    assert result.empty_columns_removed == tuple(case.get("empty_columns_removed", []))
+    if flow_name == "demanda":
+        assert result.empty_columns_removed == ("Unnamed: 0",)
+    else:
+        assert result.empty_columns_removed == tuple(case.get("empty_columns_removed", []))
     assert result.duplicate_rows == case["duplicate_rows"]
     assert result.processed_path.exists()
     assert result.report_path.exists()
@@ -293,6 +405,11 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     assert report["duplicate_key"] == case["duplicate_key"]
     assert report["duplicate_rows"] == case["duplicate_rows"]
     assert report["postgresql"] == {"status": "skipped"}
+    if flow_name == "demanda":
+        assert result.empty_columns_removed == ("Unnamed: 0",)
+        processed = result.processed_path.read_text(encoding="utf-8").splitlines()
+        assert processed[0].split(",") == DEMANDA_SOURCE_COLUMNS
+        assert processed[1].split(",")[0] == "2026"
 
 
 @pytest.mark.parametrize(
