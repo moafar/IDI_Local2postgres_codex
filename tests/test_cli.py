@@ -70,6 +70,32 @@ def test_cli_execute_without_load_does_not_enable_postgresql(
     assert "Type LOAD" not in capsys.readouterr().out
 
 
+def test_cli_source_overrides_config_only_for_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_run_flow(config: object, *, load: bool = False) -> None:
+        captured["source"] = config.data["source"]
+        captured["load"] = load
+
+    monkeypatch.setattr("up_to_postgresql.cli.run_flow", fake_run_flow)
+
+    exit_code = main(
+        [
+            "--flow",
+            "clientes",
+            "--env",
+            "test",
+            "--execute",
+            "--source",
+            "overrides/clientes.csv",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["source"]["path"] == "overrides/clientes.csv"
+    assert captured["load"] is False
+
+
 def test_cli_rejects_load_without_execute() -> None:
     with pytest.raises(SystemExit) as error:
         main(["--flow", "clientes", "--env", "test", "--load"])

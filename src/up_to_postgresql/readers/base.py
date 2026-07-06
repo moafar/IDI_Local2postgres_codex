@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from up_to_postgresql.config.schema import FlowConfig
+from up_to_postgresql.source import SourcePathError, resolve_source_path
 
 
 class ReaderError(ValueError):
@@ -47,22 +48,12 @@ class BaseTabularReader(ABC):
         return paths
 
     def source_path(self) -> Path:
-        raw_path = self.source.get("path")
-        if not isinstance(raw_path, str) or not raw_path:
-            raise ReaderError("Reader source requires a non-empty string 'path'.")
-
-        path = Path(raw_path)
-        if not path.is_absolute():
-            base_dir = self.paths.get("input_base_dir", self.paths.get("input_dir", "."))
-            if not isinstance(base_dir, str) or not base_dir:
-                raise ReaderError(
-                    "Reader paths.input_dir must be a non-empty string when set."
-                )
-            path = Path(base_dir) / path
-
-        if not path.exists():
-            raise SourceFileNotFoundError(f"Source file not found: {path}")
-        return path
+        try:
+            return resolve_source_path(self.data)
+        except FileNotFoundError as error:
+            raise SourceFileNotFoundError(str(error)) from error
+        except SourcePathError as error:
+            raise ReaderError(str(error)) from error
 
     def header_row(self) -> int | None:
         raw_header = self.source.get("header_row", 1)

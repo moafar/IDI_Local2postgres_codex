@@ -10,6 +10,7 @@ import pytest
 from up_to_postgresql.config.resolver import resolve_flow_config
 from up_to_postgresql.flows import run_flow
 from up_to_postgresql.readers import read_source
+from up_to_postgresql.source import with_source_path
 
 
 FLOW_NAME = "activitat_actual"
@@ -72,7 +73,6 @@ def test_activitat_actual_config_points_to_real_csv_and_outputs() -> None:
         "encoding": "utf-8",
         "delimiter": ";",
         "type": "csv",
-        "path": "activitat_actual_2006-ene-may__.csv",
         "header_row": 1,
     }
     assert config.data["processing"] == {
@@ -94,7 +94,12 @@ def test_activitat_actual_reads_real_csv_as_text() -> None:
     pytest.importorskip("pandas")
     assert SOURCE_FILE.exists(), f"Missing real fixture: {SOURCE_FILE}"
 
-    frame = read_source(resolve_flow_config(FLOW_NAME, "test"))
+    config = with_source_path(
+        resolve_flow_config(FLOW_NAME, "test"),
+        "activitat_actual_2006-ene-may__.csv",
+    )
+
+    frame = read_source(config)
 
     assert frame.shape == (423933, 46)
     assert list(frame.columns) == EXPECTED_COLUMNS
@@ -159,7 +164,12 @@ def test_activitat_actual_reads_real_csv_as_text() -> None:
 def test_activitat_actual_real_input_has_no_blank_rows_columns_or_duplicates() -> None:
     pytest.importorskip("pandas")
 
-    frame = read_source(resolve_flow_config(FLOW_NAME, "test"))
+    config = with_source_path(
+        resolve_flow_config(FLOW_NAME, "test"),
+        "activitat_actual_2006-ene-may__.csv",
+    )
+
+    frame = read_source(config)
     stripped = frame.map(lambda value: str(value).strip())
 
     assert not stripped.eq("").all(axis=1).any()
@@ -169,6 +179,7 @@ def test_activitat_actual_real_input_has_no_blank_rows_columns_or_duplicates() -
 
 def test_activitat_actual_processed_output_and_report_contract(tmp_path: Path) -> None:
     config = resolve_flow_config(FLOW_NAME, "test")
+    config = with_source_path(config, "activitat_actual_2006-ene-may__.csv")
     config.data["paths"]["output_base_dir"] = str(tmp_path)
 
     result = run_flow(config)

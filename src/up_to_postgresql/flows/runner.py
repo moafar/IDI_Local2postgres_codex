@@ -17,6 +17,7 @@ from up_to_postgresql.loading import (
     load_to_postgresql,
 )
 from up_to_postgresql.readers import read_source
+from up_to_postgresql.source import resolve_source_path
 
 
 LOGGER = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class FlowRunResult:
     missing_duplicate_key_columns: tuple[str, ...]
     transformations: tuple[str, ...]
     warnings: tuple[str, ...]
+    source_path: Path
     processed_path: Path
     report_path: Path
     postgresql: PostgresqlLoadResult | None = None
@@ -57,6 +59,7 @@ def run_flow(
     password_provider: Any | None = None,
     confirm_callback: Any | None = None,
 ) -> FlowRunResult:
+    source_path = resolve_source_path(config)
     frame = read_source(config)
     processing = _processing(config)
     cleaned = frame
@@ -123,6 +126,7 @@ def run_flow(
         missing_duplicate_key_columns=tuple(missing_duplicate_key_columns),
         transformations=_transformation_names(config),
         warnings=tuple(warnings),
+        source_path=source_path,
         processed_path=processed_path,
         report_path=report_path,
         postgresql=postgresql_result,
@@ -324,7 +328,7 @@ def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
         "env": result.env,
         "source": {
             "type": source.get("type") if isinstance(source, dict) else None,
-            "path": source.get("path") if isinstance(source, dict) else None,
+            "path": str(result.source_path),
             "sheet": source.get("sheet") if isinstance(source, dict) else None,
             "header_row": source.get("header_row", 1) if isinstance(source, dict) else 1,
         },

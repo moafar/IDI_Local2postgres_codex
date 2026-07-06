@@ -86,8 +86,8 @@ def _validate_source(value: Any) -> None:
         )
 
     source_path = value.get("path")
-    if not isinstance(source_path, str) or not source_path:
-        raise ConfigError("Flow source requires a non-empty string 'path'.")
+    if source_path is not None and (not isinstance(source_path, str) or not source_path):
+        raise ConfigError("Flow source.path must be a non-empty string when present.")
 
     sheet = value.get("sheet")
     if source_type == "xlsx" and (not isinstance(sheet, str) or not sheet):

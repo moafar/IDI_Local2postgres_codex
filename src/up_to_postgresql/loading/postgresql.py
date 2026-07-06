@@ -14,6 +14,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from up_to_postgresql.config.schema import FlowConfig
+from up_to_postgresql.source import SourcePathError, resolve_source_path
 
 IDENTIFIER_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 LOAD_CONTROL_COLUMNS = (
@@ -91,16 +92,19 @@ class PostgresqlLoader:
         target_table = _identifier(load["target_table"], "load.target_table")
         load_mode = load["load_mode"]
         mapping = _column_mapping(load)
-        source_path = _source_path(config)
+        try:
+            source_path = resolve_source_path(config)
+        except (FileNotFoundError, SourcePathError) as error:
+            raise PostgresqlLoadError(str(error)) from error
         source_hash = _sha256(source_path)
-        source_filename = source_path.name
+        source_filename = str(source_path)
         rows_loaded = 0
         status = "success"
         error_message: str | None = None
 
         message = (
-            f"Load {len(frame)} rows into {schema}.{target_table} "
-            f"with mode {load_mode}?"
+            f"Load file {source_filename} with {len(frame)} rows into "
+            f"{schema}.{target_table} using mode {load_mode}?"
         )
         if not self.confirm_callback(message):
             raise PostgresqlLoadCancelled("PostgreSQL load cancelled by user.")
@@ -441,25 +445,6 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _source_path(config: FlowConfig) -> Path:
-    source = config.data.get("source")
-    if not isinstance(source, dict):
-        raise PostgresqlLoadError("Flow configuration requires a source mapping.")
-    raw_path = source.get("path")
-    if not isinstance(raw_path, str) or not raw_path:
-        raise PostgresqlLoadError("Flow source.path must be a non-empty string.")
-    path = Path(raw_path)
-    if path.is_absolute():
-        return path
-    paths = config.data.get("paths", {})
-    base_dir = "."
-    if isinstance(paths, dict):
-        base_dir = paths.get("input_base_dir", paths.get("input_dir", "."))
-    if not isinstance(base_dir, str) or not base_dir:
-        raise PostgresqlLoadError("Flow paths.input_base_dir must be a string.")
-    return Path(base_dir) / path
 
 
 def _default_password_provider() -> str:

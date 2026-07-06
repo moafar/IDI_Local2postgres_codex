@@ -8,6 +8,7 @@ from up_to_postgresql.config.schema import ConfigError
 from up_to_postgresql.flows.runner import FlowRunError, run_flow
 from up_to_postgresql.loading import PostgresqlLoadError
 from up_to_postgresql.registry import FlowRegistry
+from up_to_postgresql.source import SourcePathError, with_source_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Load processed rows into PostgreSQL. Requires --execute.",
     )
+    parser.add_argument(
+        "--source",
+        help=(
+            "Source file for this execution, relative to paths.input_base_dir. "
+            "Overrides source.path in memory only."
+        ),
+    )
     return parser
 
 
@@ -47,8 +55,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         FlowRegistry().require(args.flow)
         config = resolve_flow_config(args.flow, args.env)
+        if args.source is not None:
+            config = with_source_path(config, args.source)
         result = run_flow(config, load=args.load) if args.execute else None
-    except (ConfigError, FileNotFoundError, FlowRunError, PostgresqlLoadError) as error:
+    except (
+        ConfigError,
+        FileNotFoundError,
+        FlowRunError,
+        PostgresqlLoadError,
+        SourcePathError,
+    ) as error:
         parser.error(str(error))
     print(f"flow={args.flow}")
     print(f"env={args.env}")

@@ -12,6 +12,7 @@ import pytest
 from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.flows.runner import run_flow
 from up_to_postgresql.loading import PostgresqlLoadError, load_to_postgresql
+from up_to_postgresql.source import with_source_path
 
 
 LOAD_CONTROL_COLUMNS = [
@@ -186,6 +187,33 @@ def test_load_builds_connection_without_config_password(tmp_path: Path) -> None:
     assert result.rows_loaded == 1
     assert connection.rows == [("1", "Ana")]
     assert connection.load_control[-1]["status"] == "success"
+
+
+def test_load_control_and_confirmation_use_real_source_file(tmp_path: Path) -> None:
+    (tmp_path / "configured.csv").write_text("id,name\n0,Wrong\n", encoding="utf-8")
+    real_source = tmp_path / "real.csv"
+    real_source.write_text("id,name\n1,Ana\n", encoding="utf-8")
+    connection = FakeConnection()
+    messages: list[str] = []
+    config = with_source_path(base_config(tmp_path), "real.csv")
+
+    result = load_to_postgresql(
+        config,
+        pd.DataFrame({"id": ["1"], "name": ["Ana"]}),
+        connection_factory=lambda **_kwargs: connection,
+        password_provider=lambda: "secret",
+        confirm_callback=lambda message: messages.append(message) or True,
+    )
+
+    expected_hash = hashlib.sha256(real_source.read_bytes()).hexdigest()
+    assert result.source_filename == str(real_source.resolve())
+    assert result.source_hash == expected_hash
+    assert connection.load_control[-1]["source_filename"] == str(real_source.resolve())
+    assert connection.load_control[-1]["source_hash"] == expected_hash
+    assert str(real_source.resolve()) in messages[0]
+    assert "1 rows" in messages[0]
+    assert "test.items" in messages[0]
+    assert "append" in messages[0]
 
 
 def test_load_reads_password_from_environment(

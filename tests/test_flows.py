@@ -9,6 +9,7 @@ import pytest
 from up_to_postgresql.config.resolver import resolve_flow_config
 from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.flows.runner import FlowRunError, run_flow
+from up_to_postgresql.source import SourcePathError, with_source_path
 
 
 def test_run_flow_cleans_trims_validates_and_reports(tmp_path: Path) -> None:
@@ -71,6 +72,99 @@ def test_run_flow_rejects_missing_required_columns(tmp_path: Path) -> None:
 
     with pytest.raises(FlowRunError, match="Required columns"):
         run_flow(config)
+
+
+def test_run_flow_requires_source_for_execution_when_config_has_no_path(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("pandas")
+    config = FlowConfig(
+        name="sample",
+        env="test",
+        data={
+            "paths": {"input_base_dir": str(tmp_path), "output_base_dir": str(tmp_path)},
+            "source": {"type": "csv"},
+        },
+    )
+
+    with pytest.raises(SourcePathError, match="pass --source"):
+        run_flow(config)
+
+
+def test_run_flow_uses_source_override_and_reports_real_file(tmp_path: Path) -> None:
+    pytest.importorskip("pandas")
+    source = tmp_path / "actual.csv"
+    source.write_text("id,name\n1,Ana\n", encoding="utf-8")
+    config = with_source_path(
+        FlowConfig(
+            name="sample",
+            env="test",
+            data={
+                "paths": {
+                    "input_base_dir": str(tmp_path),
+                    "output_base_dir": str(tmp_path / "output"),
+                },
+                "source": {"type": "csv"},
+            },
+        ),
+        "actual.csv",
+    )
+
+    result = run_flow(config)
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+
+    assert result.rows_written == 1
+    assert report["source"]["path"] == str(source.resolve())
+
+
+@pytest.mark.parametrize(
+    ("raw_path", "message"),
+    [
+        ("/tmp/input.csv", "relative"),
+        ("../input.csv", r"\.\."),
+        ("missing.csv", "Source file not found"),
+    ],
+)
+def test_run_flow_rejects_invalid_source_override(
+    tmp_path: Path, raw_path: str, message: str
+) -> None:
+    pytest.importorskip("pandas")
+    config = with_source_path(
+        FlowConfig(
+            name="sample",
+            env="test",
+            data={
+                "paths": {"input_base_dir": str(tmp_path), "output_base_dir": str(tmp_path)},
+                "source": {"type": "csv"},
+            },
+        ),
+        raw_path,
+    )
+
+    with pytest.raises((SourcePathError, FileNotFoundError), match=message):
+        run_flow(config)
+
+
+def test_source_override_does_not_change_load_contract(tmp_path: Path) -> None:
+    config = FlowConfig(
+        name="sample",
+        env="test",
+        data={
+            "paths": {"input_base_dir": str(tmp_path), "output_base_dir": str(tmp_path)},
+            "source": {"type": "csv"},
+            "load": {
+                "target_table": "items",
+                "load_mode": "append",
+                "column_mapping": [{"source": "id", "target": "id"}],
+            },
+        },
+    )
+
+    overridden = with_source_path(config, "actual.csv")
+
+    assert overridden.data["source"]["path"] == "actual.csv"
+    assert overridden.data["load"] == config.data["load"]
+    assert "path" not in config.data["source"]
 
 
 def test_run_flow_warns_for_missing_columns_policy_warning(tmp_path: Path) -> None:
