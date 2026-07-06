@@ -38,7 +38,7 @@ output:
   report_filename: llee_trams_demora_report.json
 load:
   target_table: llee_trams_demora
-  load_mode: fail
+  load_mode: append
   reload_existing_hash: false
   column_mapping:
     - source: any

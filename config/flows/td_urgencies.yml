@@ -31,7 +31,7 @@ output:
   report_filename: td_urgencies_report.json
 load:
   target_table: td_urgencies
-  load_mode: fail
+  load_mode: append
   reload_existing_hash: false
   column_mapping:
     - source: solicitant

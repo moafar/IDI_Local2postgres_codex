@@ -31,6 +31,7 @@ LOAD_CONTROL_COLUMNS = (
     "finished_at",
     "error_message",
 )
+STAGING_TABLE = "_uptopg_load_staging"
 
 
 class PostgresqlLoadError(RuntimeError):
@@ -91,6 +92,7 @@ class PostgresqlLoader:
         schema = _identifier(postgresql["schema"], "postgresql.schema")
         target_table = _identifier(load["target_table"], "load.target_table")
         load_mode = load["load_mode"]
+        partition_column = _partition_column(load)
         mapping = _column_mapping(load)
         try:
             source_path = resolve_source_path(config)
@@ -122,6 +124,14 @@ class PostgresqlLoader:
                 with connection.cursor() as cursor:
                     prepared = _prepare_frame(frame, mapping)
                     _validate_database_contract(cursor, schema, target_table, mapping)
+                    _validate_partition_column(
+                        cursor,
+                        schema,
+                        target_table,
+                        prepared,
+                        load_mode,
+                        partition_column,
+                    )
                     _validate_source_hash(
                         cursor,
                         schema,
@@ -133,8 +143,19 @@ class PostgresqlLoader:
                     _validate_load_mode_preconditions(
                         cursor, schema, target_table, load_mode
                     )
-                    _apply_load_mode(cursor, schema, target_table, load_mode)
-                    rows_loaded = _insert_rows(cursor, schema, target_table, prepared)
+                    if load_mode == "replace_partition":
+                        rows_loaded = _replace_partition(
+                            cursor,
+                            schema,
+                            target_table,
+                            prepared,
+                            partition_column,
+                        )
+                    else:
+                        _apply_load_mode(cursor, schema, target_table, load_mode)
+                        rows_loaded = _insert_rows(
+                            cursor, schema, target_table, prepared
+                        )
                     _insert_load_control(
                         cursor,
                         schema,
@@ -231,6 +252,13 @@ def _column_mapping(load: dict[str, Any]) -> list[tuple[str, str]]:
     return mapping
 
 
+def _partition_column(load: dict[str, Any]) -> str | None:
+    value = load.get("partition_column")
+    if value is None:
+        return None
+    return _identifier(value, "load.partition_column")
+
+
 def _prepare_frame(frame: pd.DataFrame, mapping: list[tuple[str, str]]) -> pd.DataFrame:
     missing = [source for source, _ in mapping if source not in frame.columns]
     if missing:
@@ -260,6 +288,32 @@ def _validate_database_contract(
     ]
     if missing_control:
         raise PostgresqlLoadError(f"load_control missing columns: {missing_control}")
+
+
+def _validate_partition_column(
+    cursor: Any,
+    schema: str,
+    target_table: str,
+    frame: pd.DataFrame,
+    load_mode: str,
+    partition_column: str | None,
+) -> None:
+    if load_mode != "replace_partition":
+        return
+    if partition_column is None:
+        raise PostgresqlLoadError(
+            "load.partition_column is required for replace_partition."
+        )
+    if partition_column not in frame.columns:
+        raise PostgresqlLoadError(
+            "load.partition_column is not present in processed DataFrame: "
+            f"{partition_column}"
+        )
+    if partition_column not in _table_columns(cursor, schema, target_table):
+        raise PostgresqlLoadError(
+            "load.partition_column is not present in target table "
+            f"{schema}.{target_table}: {partition_column}"
+        )
 
 
 def _validate_source_hash(
@@ -302,7 +356,7 @@ def _validate_load_mode_preconditions(
                 f"Target table {schema}.{target_table} already has rows."
             )
         return
-    if load_mode in ("append", "replace"):
+    if load_mode in ("append", "replace", "replace_partition"):
         return
     raise PostgresqlLoadError(f"Unsupported load mode: {load_mode}")
 
@@ -316,14 +370,76 @@ def _apply_load_mode(cursor: Any, schema: str, target_table: str, load_mode: str
     raise PostgresqlLoadError(f"Unsupported load mode: {load_mode}")
 
 
+def _replace_partition(
+    cursor: Any,
+    schema: str,
+    target_table: str,
+    frame: pd.DataFrame,
+    partition_column: str | None,
+) -> int:
+    if partition_column is None:
+        raise PostgresqlLoadError(
+            "load.partition_column is required for replace_partition."
+        )
+    cursor.execute(
+        f"""
+        create temporary table {_quote(STAGING_TABLE)}
+        (like {_qualified_table(schema, target_table)} including defaults)
+        on commit drop
+        """
+    )
+    rows_loaded = _insert_rows(cursor, None, STAGING_TABLE, frame)
+    partition_values = _staging_partition_values(cursor, STAGING_TABLE, partition_column)
+    if not partition_values:
+        raise PostgresqlLoadError(
+            "replace_partition found no partition values in "
+            f"{partition_column}."
+        )
+    cursor.execute(
+        f"""
+        delete from {_qualified_table(schema, target_table)}
+        where {_quote(partition_column)} in (
+            select distinct {_quote(partition_column)}
+            from {_quote(STAGING_TABLE)}
+            where {_quote(partition_column)} is not null
+              and {_quote(partition_column)} <> ''
+        )
+        """
+    )
+    columns = [_identifier(str(column), "column") for column in frame.columns]
+    cursor.execute(
+        f"""
+        insert into {_qualified_table(schema, target_table)}
+        ({', '.join(_quote(column) for column in columns)})
+        select {', '.join(_quote(column) for column in columns)}
+        from {_quote(STAGING_TABLE)}
+        """
+    )
+    return rows_loaded
+
+
+def _staging_partition_values(
+    cursor: Any, staging_table: str, partition_column: str
+) -> list[Any]:
+    cursor.execute(
+        f"""
+        select distinct {_quote(partition_column)}
+        from {_quote(staging_table)}
+        where {_quote(partition_column)} is not null
+          and {_quote(partition_column)} <> ''
+        """
+    )
+    return [row[0] for row in cursor.fetchall()]
+
+
 def _insert_rows(
-    cursor: Any, schema: str, target_table: str, frame: pd.DataFrame
+    cursor: Any, schema: str | None, target_table: str, frame: pd.DataFrame
 ) -> int:
     columns = [_identifier(str(column), "column") for column in frame.columns]
     if not columns:
         return 0
     sql = (
-        f"insert into {_quote(schema)}.{_quote(target_table)} "
+        f"insert into {_qualified_table(schema, target_table)} "
         f"({', '.join(_quote(column) for column in columns)}) "
         f"values ({', '.join(['%s'] * len(columns))})"
     )
@@ -437,6 +553,12 @@ def _identifier(value: Any, label: str) -> str:
 
 def _quote(identifier: str) -> str:
     return f'"{_identifier(identifier, "identifier")}"'
+
+
+def _qualified_table(schema: str | None, table: str) -> str:
+    if schema is None:
+        return _quote(table)
+    return f"{_quote(schema)}.{_quote(table)}"
 
 
 def _sha256(path: Path) -> str:

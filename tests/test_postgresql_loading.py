@@ -43,6 +43,7 @@ class FakeCursor:
         return None
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        self.connection.begin()
         self.connection.statements.append((sql, params))
         normalized = " ".join(sql.lower().split())
         if "from information_schema.tables" in normalized:
@@ -50,7 +51,10 @@ class FakeCursor:
             self.result = [((schema, table) in self.connection.tables,)]
         elif "from information_schema.columns" in normalized:
             schema, table = params or ("", "")
-            self.result = [(column,) for column in self.connection.tables[(schema, table)]]
+            self.result = [
+                (column,)
+                for column in self.connection.table_columns_for_query(schema, table)
+            ]
         elif "from \"test\".load_control" in normalized and "count(*)" in normalized:
             flow_name, target_table, source_hash = params or ("", "", "")
             count = sum(
@@ -64,6 +68,40 @@ class FakeCursor:
             self.result = [(count,)]
         elif "select count(*) from \"test\".\"items\"" in normalized:
             self.result = [(len(self.connection.rows),)]
+        elif normalized.startswith("create temporary table"):
+            self.connection.staging_rows = []
+            self.result = []
+        elif (
+            normalized.startswith("select distinct")
+            and "from \"_uptopg_load_staging\"" in normalized
+        ):
+            partition_index = self.connection.tables[("test", "items")].index(
+                self.connection.partition_column
+            )
+            values = sorted(
+                {
+                    row[partition_index]
+                    for row in self.connection.staging_rows
+                    if row[partition_index] not in ("", None)
+                }
+            )
+            self.result = [(value,) for value in values]
+        elif normalized.startswith("delete from \"test\".\"items\" where"):
+            partition_index = self.connection.tables[("test", "items")].index(
+                self.connection.partition_column
+            )
+            partition_values = {
+                row[partition_index]
+                for row in self.connection.staging_rows
+                if row[partition_index] not in ("", None)
+            }
+            self.connection.deleted_partition_values = partition_values
+            self.connection.rows = [
+                row
+                for row in self.connection.rows
+                if row[partition_index] not in partition_values
+            ]
+            self.result = []
         elif normalized.startswith("delete from"):
             self.connection.deleted = True
             self.connection.rows.clear()
@@ -71,6 +109,18 @@ class FakeCursor:
         elif normalized.startswith("insert into \"test\".load_control"):
             row = dict(zip(LOAD_CONTROL_COLUMNS, params or (), strict=False))
             self.connection.load_control.append(row)
+            self.result = []
+        elif normalized.startswith("insert into \"_uptopg_load_staging\""):
+            self.connection.staging_rows.append(tuple(params or ()))
+            self.result = []
+        elif (
+            normalized.startswith("insert into \"test\".\"items\"")
+            and "select" in normalized
+            and "from \"_uptopg_load_staging\"" in normalized
+        ):
+            if self.connection.fail_insert:
+                raise RuntimeError("insert failed")
+            self.connection.rows.extend(self.connection.staging_rows)
             self.result = []
         elif normalized.startswith("insert into \"test\".\"items\""):
             if self.connection.fail_insert:
@@ -100,7 +150,13 @@ class FakeConnection:
         self.statements: list[tuple[str, tuple[Any, ...] | None]] = []
         self.closed = False
         self.deleted = False
+        self.deleted_partition_values: set[Any] = set()
+        self.staging_rows: list[tuple[Any, ...]] = []
+        self.partition_column = "id"
         self.fail_insert = False
+        self.commits = 0
+        self.rollbacks = 0
+        self._snapshot: dict[str, Any] | None = None
 
     def __enter__(self) -> FakeConnection:
         return self
@@ -111,8 +167,52 @@ class FakeConnection:
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
 
+    def table_columns_for_query(self, schema: str, table: str) -> list[str]:
+        return self.tables[(schema, table)]
+
+    def begin(self) -> None:
+        if self._snapshot is not None:
+            return
+        self._snapshot = {
+            "rows": list(self.rows),
+            "load_control": [dict(row) for row in self.load_control],
+            "deleted": self.deleted,
+            "deleted_partition_values": set(self.deleted_partition_values),
+            "staging_rows": list(self.staging_rows),
+        }
+
+    def commit(self) -> None:
+        self.commits += 1
+        self._snapshot = None
+        self.staging_rows = []
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+        if self._snapshot is None:
+            return
+        self.rows = self._snapshot["rows"]
+        self.load_control = self._snapshot["load_control"]
+        self.deleted = self._snapshot["deleted"]
+        self.deleted_partition_values = self._snapshot["deleted_partition_values"]
+        self.staging_rows = self._snapshot["staging_rows"]
+        self._snapshot = None
+
     def close(self) -> None:
         self.closed = True
+
+
+class MissingPartitionTargetConnection(FakeConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables[("test", "items")] = ["id", "name", "any_prestacio"]
+        self.item_column_queries = 0
+
+    def table_columns_for_query(self, schema: str, table: str) -> list[str]:
+        if (schema, table) == ("test", "items"):
+            self.item_column_queries += 1
+            if self.item_column_queries > 1:
+                return ["id", "name"]
+        return super().table_columns_for_query(schema, table)
 
 
 class CloseOnErrorConnection(FakeConnection):
@@ -132,9 +232,22 @@ class CloseOnErrorConnection(FakeConnection):
         return super().cursor()
 
 
-def base_config(tmp_path: Path, *, load_mode: str = "append") -> FlowConfig:
+def base_config(
+    tmp_path: Path, *, load_mode: str = "append", partition_column: str | None = None
+) -> FlowConfig:
     source = tmp_path / "input.csv"
     source.write_text("id,name\n1,Ana\n", encoding="utf-8")
+    load = {
+        "target_table": "items",
+        "load_mode": load_mode,
+        "reload_existing_hash": False,
+        "column_mapping": [
+            {"source": "id", "target": "id"},
+            {"source": "name", "target": "name"},
+        ],
+    }
+    if partition_column is not None:
+        load["partition_column"] = partition_column
     return FlowConfig(
         name="sample",
         env="test",
@@ -148,15 +261,7 @@ def base_config(tmp_path: Path, *, load_mode: str = "append") -> FlowConfig:
                 "user": "rom",
                 "schema": "test",
             },
-            "load": {
-                "target_table": "items",
-                "load_mode": load_mode,
-                "reload_existing_hash": False,
-                "column_mapping": [
-                    {"source": "id", "target": "id"},
-                    {"source": "name", "target": "name"},
-                ],
-            },
+            "load": load,
         },
     )
 
@@ -393,6 +498,116 @@ def test_load_modes_fail_append_and_replace(tmp_path: Path) -> None:
             password_provider=lambda: "secret",
             confirm_callback=lambda _message: True,
         )
+
+
+def test_replace_partition_requires_partition_column(tmp_path: Path) -> None:
+    connection = FakeConnection()
+
+    with pytest.raises(PostgresqlLoadError, match="partition_column is required"):
+        load_to_postgresql(
+            base_config(tmp_path, load_mode="replace_partition"),
+            pd.DataFrame({"id": ["1"], "name": ["Ana"]}),
+            connection_factory=lambda **_kwargs: connection,
+            password_provider=lambda: "secret",
+            confirm_callback=lambda _message: True,
+        )
+
+
+def test_replace_partition_rejects_missing_dataframe_column(tmp_path: Path) -> None:
+    connection = FakeConnection()
+
+    with pytest.raises(PostgresqlLoadError, match="processed DataFrame"):
+        load_to_postgresql(
+            base_config(
+                tmp_path,
+                load_mode="replace_partition",
+                partition_column="any_prestacio",
+            ),
+            pd.DataFrame({"id": ["1"], "name": ["Ana"]}),
+            connection_factory=lambda **_kwargs: connection,
+            password_provider=lambda: "secret",
+            confirm_callback=lambda _message: True,
+        )
+
+
+def test_replace_partition_rejects_missing_target_column(tmp_path: Path) -> None:
+    connection = MissingPartitionTargetConnection()
+    config = base_config(
+        tmp_path, load_mode="replace_partition", partition_column="any_prestacio"
+    )
+    config.data["load"]["column_mapping"].append(
+        {"source": "any", "target": "any_prestacio"}
+    )
+
+    with pytest.raises(PostgresqlLoadError, match="target table"):
+        load_to_postgresql(
+            config,
+            pd.DataFrame({"id": ["1"], "name": ["Ana"], "any": ["2026"]}),
+            connection_factory=lambda **_kwargs: connection,
+            password_provider=lambda: "secret",
+            confirm_callback=lambda _message: True,
+        )
+
+
+def test_replace_partition_requires_partition_values(tmp_path: Path) -> None:
+    connection = FakeConnection()
+
+    with pytest.raises(PostgresqlLoadError, match="no partition values"):
+        load_to_postgresql(
+            base_config(tmp_path, load_mode="replace_partition", partition_column="id"),
+            pd.DataFrame({"id": [""], "name": ["Ana"]}),
+            connection_factory=lambda **_kwargs: connection,
+            password_provider=lambda: "secret",
+            confirm_callback=lambda _message: True,
+        )
+
+    assert connection.rows == []
+    assert connection.load_control[-1]["status"] == "error"
+
+
+def test_replace_partition_deletes_only_staged_partition_values(
+    tmp_path: Path,
+) -> None:
+    connection = FakeConnection()
+    connection.rows = [("2025", "Old"), ("2026", "Previous"), ("2027", "Future")]
+
+    result = load_to_postgresql(
+        base_config(tmp_path, load_mode="replace_partition", partition_column="id"),
+        pd.DataFrame({"id": ["2026"], "name": ["Current"]}),
+        connection_factory=lambda **_kwargs: connection,
+        password_provider=lambda: "secret",
+        confirm_callback=lambda _message: True,
+    )
+
+    assert result.load_mode == "replace_partition"
+    assert connection.deleted_partition_values == {"2026"}
+    assert connection.rows == [
+        ("2025", "Old"),
+        ("2027", "Future"),
+        ("2026", "Current"),
+    ]
+    assert connection.load_control[-1]["load_mode"] == "replace_partition"
+    assert connection.load_control[-1]["status"] == "success"
+
+
+def test_replace_partition_rolls_back_when_insert_fails(tmp_path: Path) -> None:
+    connection = FakeConnection()
+    connection.rows = [("2025", "Old"), ("2026", "Previous")]
+    connection.fail_insert = True
+
+    with pytest.raises(RuntimeError, match="insert failed"):
+        load_to_postgresql(
+            base_config(tmp_path, load_mode="replace_partition", partition_column="id"),
+            pd.DataFrame({"id": ["2026"], "name": ["Current"]}),
+            connection_factory=lambda **_kwargs: connection,
+            password_provider=lambda: "secret",
+            confirm_callback=lambda _message: True,
+        )
+
+    assert connection.rows == [("2025", "Old"), ("2026", "Previous")]
+    assert connection.rollbacks == 1
+    assert connection.load_control[-1]["load_mode"] == "replace_partition"
+    assert connection.load_control[-1]["status"] == "error"
 
 
 def test_run_flow_without_load_does_not_touch_postgresql(tmp_path: Path) -> None:

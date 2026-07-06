@@ -88,6 +88,9 @@ def test_activitat_actual_config_points_to_real_csv_and_outputs() -> None:
         "processed_filename": "activitat_actual_processed.csv",
         "report_filename": "activitat_actual_report.json",
     }
+    assert config.data["load"]["target_table"] == "activitat_actual"
+    assert config.data["load"]["load_mode"] == "replace_partition"
+    assert config.data["load"]["partition_column"] == "any_prestacio"
 
 
 def test_activitat_actual_reads_real_csv_as_text() -> None:

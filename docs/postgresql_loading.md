@@ -26,7 +26,8 @@ Cada entorno declara conexión sin password:
 Cada flujo cargable declara en `load`:
 
 - `target_table`
-- `load_mode`: `fail`, `replace` o `append`
+- `load_mode`: `fail`, `replace`, `append` o `replace_partition`
+- `partition_column` si `load_mode` es `replace_partition`
 - `reload_existing_hash`
 - `column_mapping` con pares `source` y `target`
 
@@ -56,3 +57,6 @@ Modos:
 - `fail`: falla si la tabla destino ya tiene filas.
 - `replace`: borra filas de la tabla destino y carga todo.
 - `append`: añade filas.
+- `replace_partition`: carga primero en una tabla temporal, identifica los
+  valores presentes en `partition_column`, borra solo esas particiones en la
+  tabla destino e inserta los datos nuevos dentro de la misma transacción.

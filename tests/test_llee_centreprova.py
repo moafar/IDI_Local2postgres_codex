@@ -60,6 +60,8 @@ def test_llee_centreprova_config_points_to_real_sheet_and_outputs() -> None:
         "processed_filename": "llee_centreprova_processed.csv",
         "report_filename": "llee_centreprova_report.json",
     }
+    assert config.data["load"]["target_table"] == "llee_centre_prova"
+    assert config.data["load"]["load_mode"] == "append"
 
 
 def test_llee_centreprova_reads_real_xlsx_as_text() -> None:

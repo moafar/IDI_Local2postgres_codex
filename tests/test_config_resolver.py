@@ -274,3 +274,74 @@ load:
 
     with pytest.raises(ConfigError, match="duplicate target"):
         resolve_flow_config("clientes", "test", config_dir=tmp_path)
+
+
+def test_resolver_accepts_replace_partition_load_mode(tmp_path: Path) -> None:
+    write(
+        tmp_path / "common.yml",
+        """
+source:
+  type: csv
+  path: activitat_actual.csv
+postgresql:
+  host: localhost
+  port: 5433
+  database: data_dbo_idi
+  user: rom
+  schema: test
+""",
+    )
+    write(tmp_path / "env" / "test.yml", "env: test\n")
+    write(
+        tmp_path / "flows" / "activitat_actual.yml",
+        """
+name: activitat_actual
+load:
+  target_table: activitat_actual
+  load_mode: replace_partition
+  partition_column: any_prestacio
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio
+""",
+    )
+
+    config = resolve_flow_config("activitat_actual", "test", config_dir=tmp_path)
+
+    assert config.data["load"]["load_mode"] == "replace_partition"
+    assert config.data["load"]["partition_column"] == "any_prestacio"
+
+
+def test_resolver_rejects_replace_partition_without_partition_column(
+    tmp_path: Path,
+) -> None:
+    write(
+        tmp_path / "common.yml",
+        """
+source:
+  type: csv
+  path: activitat_actual.csv
+postgresql:
+  host: localhost
+  port: 5433
+  database: data_dbo_idi
+  user: rom
+  schema: test
+""",
+    )
+    write(tmp_path / "env" / "test.yml", "env: test\n")
+    write(
+        tmp_path / "flows" / "activitat_actual.yml",
+        """
+name: activitat_actual
+load:
+  target_table: activitat_actual
+  load_mode: replace_partition
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio
+""",
+    )
+
+    with pytest.raises(ConfigError, match="load.partition_column"):
+        resolve_flow_config("activitat_actual", "test", config_dir=tmp_path)

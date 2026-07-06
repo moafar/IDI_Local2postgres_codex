@@ -34,7 +34,7 @@ output:
   report_filename: td_ambulatoris_report.json
 load:
   target_table: td_ambulatoris
-  load_mode: fail
+  load_mode: append
   reload_existing_hash: false
   column_mapping:
     - source: any

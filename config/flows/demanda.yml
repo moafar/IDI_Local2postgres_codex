@@ -44,7 +44,8 @@ output:
   report_filename: demanda_report.json
 load:
   target_table: demanda
-  load_mode: fail
+  load_mode: replace_partition
+  partition_column: any_prestacio
   reload_existing_hash: false
   column_mapping:
     - source: Any prestació (YYYY)

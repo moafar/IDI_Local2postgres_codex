@@ -7,28 +7,28 @@ from up_to_postgresql.cli import main
 
 
 def test_cli_accepts_flow_and_env(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = main(["--flow", "clientes", "--env", "test"])
+    exit_code = main(["--flow", "llee_centreprova", "--env", "test"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "flow=clientes" in captured.out
+    assert "flow=llee_centreprova" in captured.out
     assert "env=test" in captured.out
 
 
 def test_cli_accepts_prd_env(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = main(["--flow", "ventas", "--env", "prd"])
+    exit_code = main(["--flow", "demanda", "--env", "prd"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "flow=ventas" in captured.out
+    assert "flow=demanda" in captured.out
     assert "env=prd" in captured.out
 
 
 def test_cli_rejects_invalid_env() -> None:
     with pytest.raises(SystemExit) as error:
-        main(["--flow", "clientes", "--env", "dev"])
+        main(["--flow", "llee_centreprova", "--env", "dev"])
 
     assert error.value.code == 2
 
@@ -63,7 +63,7 @@ def test_cli_execute_without_load_does_not_enable_postgresql(
 
     monkeypatch.setattr("up_to_postgresql.cli.run_flow", fake_run_flow)
 
-    exit_code = main(["--flow", "clientes", "--env", "test", "--execute"])
+    exit_code = main(["--flow", "llee_centreprova", "--env", "test", "--execute"])
 
     assert exit_code == 0
     assert calls == [False]
@@ -82,22 +82,22 @@ def test_cli_source_overrides_config_only_for_run(monkeypatch: pytest.MonkeyPatc
     exit_code = main(
         [
             "--flow",
-            "clientes",
+            "llee_centreprova",
             "--env",
             "test",
             "--execute",
             "--source",
-            "overrides/clientes.csv",
+            "overrides/llee_mensual.xlsx",
         ]
     )
 
     assert exit_code == 0
-    assert captured["source"]["path"] == "overrides/clientes.csv"
+    assert captured["source"]["path"] == "overrides/llee_mensual.xlsx"
     assert captured["load"] is False
 
 
 def test_cli_rejects_load_without_execute() -> None:
     with pytest.raises(SystemExit) as error:
-        main(["--flow", "clientes", "--env", "test", "--load"])
+        main(["--flow", "llee_centreprova", "--env", "test", "--load"])
 
     assert error.value.code == 2

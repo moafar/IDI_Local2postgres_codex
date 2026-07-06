@@ -18,6 +18,7 @@ FLOW_CASES = {
         "sheet": "Trams demora per Centre i Prova",
         "shape": (473, 15),
         "target_table": "llee_trams_demora",
+        "load_mode": "append",
         "columns": [
             "any",
             "mes",
@@ -66,6 +67,7 @@ FLOW_CASES = {
         "sheet": "td_ambulatoris",
         "shape": (12996, 17),
         "target_table": "td_ambulatoris",
+        "load_mode": "append",
         "columns": [
             "any",
             "mes",
@@ -112,6 +114,7 @@ FLOW_CASES = {
         "sheet": "td_urgencies",
         "shape": (588, 8),
         "target_table": "td_urgencies",
+        "load_mode": "append",
         "columns": [
             "solicitant",
             "any",
@@ -140,6 +143,8 @@ FLOW_CASES = {
         "sheet": "Demanda",
         "shape": (9, 23),
         "target_table": "demanda",
+        "load_mode": "replace_partition",
+        "partition_column": "any_prestacio",
         "columns": [
             "Any prestació (YYYY)",
             "Mes prestació (MM)",
@@ -223,7 +228,11 @@ def test_remaining_real_flow_config_contract(flow_name: str) -> None:
     assert config.data["validation"]["duplicate_policy"] == "report"
     assert config.data["validation"]["missing_columns_policy"] == "error"
     assert config.data["load"]["target_table"] == case["target_table"]
-    assert config.data["load"]["load_mode"] == "fail"
+    assert config.data["load"]["load_mode"] == case["load_mode"]
+    if "partition_column" in case:
+        assert config.data["load"]["partition_column"] == case["partition_column"]
+    else:
+        assert "partition_column" not in config.data["load"]
     assert [item["source"] for item in config.data["load"]["column_mapping"]] == case[
         "columns"
     ]

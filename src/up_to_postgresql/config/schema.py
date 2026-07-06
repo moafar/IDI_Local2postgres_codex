@@ -13,7 +13,7 @@ from typing import Any
 VALID_ENVS = ("test", "prd")
 VALID_SOURCE_TYPES = ("csv", "xlsx")
 VALID_POLICIES = ("error", "warning", "report")
-VALID_LOAD_MODES = ("fail", "replace", "append")
+VALID_LOAD_MODES = ("fail", "replace", "append", "replace_partition")
 FLOW_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 IDENTIFIER_PATTERN = re.compile(r"^[a-z_][a-z0-9_]*$")
 
@@ -186,6 +186,15 @@ def _validate_load(value: Any) -> None:
     load_mode = value.get("load_mode")
     if load_mode not in VALID_LOAD_MODES:
         raise ConfigError(f"'load.load_mode' must be one of {VALID_LOAD_MODES}.")
+    partition_column = value.get("partition_column")
+    if load_mode == "replace_partition":
+        if not _is_identifier(partition_column):
+            raise ConfigError(
+                "'load.partition_column' must be a PostgreSQL identifier "
+                "when load.load_mode is 'replace_partition'."
+            )
+    elif partition_column is not None and not _is_identifier(partition_column):
+        raise ConfigError("'load.partition_column' must be a PostgreSQL identifier.")
     reload_hash = value.get("reload_existing_hash")
     if reload_hash is not None and not isinstance(reload_hash, bool):
         raise ConfigError("'load.reload_existing_hash' must be a boolean.")
