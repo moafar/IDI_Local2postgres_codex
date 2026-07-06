@@ -30,7 +30,7 @@ Los flujos reales actuales son:
 - `td_urgencies`
 - `demanda`
 
-Todos escriben salida procesada y reporte bajo `paths.output_base_dir`.
+Todos escriben una salida procesada y un reporte bajo `paths.output_base_dir`.
 
 ## CLI
 
@@ -54,30 +54,41 @@ Reglas relevantes:
 - Sin `--load`, no se toca PostgreSQL.
 - `--source` no modifica YAML, solo la configuración en memoria de esa ejecución.
 - `--load` sin `--execute` se rechaza.
+- La contraseña de PostgreSQL puede definirse mediante `POSTGRES_PASSWORD` o introducirse cuando la aplicación la solicite.
 
 ## Ejemplos
 
 Procesamiento sin carga:
 
 ```bash
-python -m up_to_postgresql --flow llee_centreprova --env test --execute
+python -m up_to_postgresql \
+  --flow llee_centreprova \
+  --env test \
+  --execute
 ```
 
 Carga con `--load`:
 
 ```bash
-export POSTGRES_PASSWORD='...'
-python -m up_to_postgresql --flow activitat_actual --env prd --execute --load
+python -m up_to_postgresql \
+  --flow activitat_actual \
+  --env prd \
+  --execute \
+  --load
 ```
 
 Carga usando `--source`:
 
 ```bash
-export POSTGRES_PASSWORD='...'
-python -m up_to_postgresql --flow llee_centreprova --env test --execute --load --source overrides/llee_mensual.xlsx
+python -m up_to_postgresql \
+  --flow llee_centreprova \
+  --env test \
+  --source overrides/llee_mensual.xlsx \
+  --execute \
+  --load
 ```
 
-En este último caso el archivo indicado se resuelve respecto a `paths.input_base_dir` y solo afecta a esa ejecución.
+En este último caso, el archivo indicado se resuelve respecto a `paths.input_base_dir` y solo afecta a esa ejecución.
 
 ## Rutas y ficheros
 
@@ -137,18 +148,19 @@ Estado validado de carga en `prd`:
 - `activitat_actual`: 1.499.053 filas
   - `2025`: 986.124
   - `2026`: 512.929
+- `demanda`: 681.926 filas
+  - `2026`: 681.926
 - `llee_centreprova` / `llee_centre_prova`: 315 filas
 - `llee_trams_demora`: 591 filas
 - `td_ambulatoris`: 12.996 filas
 - `td_urgencies`: 610 filas
-- `demanda`: 0 filas
 
 Incidencias documentables:
 
 - `td_ambulatoris` `202605` no se cargó porque el archivo disponible no contenía las 17 columnas requeridas.
 - `td_urgencies` `202605` se cargó desde `td_202605_normalized.xlsx`, generado a partir de la hoja `td2025`.
 - `td_urgencies` no conserva coordenadas: si el origen incluye `lat` o `lon`, no forman parte del contrato de carga PostgreSQL.
-- `demanda` todavía no tiene carga real en `prd`.
+- `demanda` se cargó correctamente en `prd` desde `_EXTRACCIO_demanda_detallada (202601-202606).xlsx`, con `681.926` filas para el año `2026`, usando `replace_partition` por `any_prestacio`.
 
 ## Nota sobre `llee_centreprova`
 
