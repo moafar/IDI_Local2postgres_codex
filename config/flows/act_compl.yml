@@ -1,0 +1,104 @@
+name: act_compl
+source:
+  type: xlsx
+  path: act_compl/_EXT_ACT-COMPL_DATA-REVISAT_202601.xlsx
+  sheet: _activitat_complementaria
+  header_row: 2
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - Any prestació (YYYY)
+    - Centre SAP codi (Hospital)
+    - Codificació genèrica codi
+    - Codificació genèrica desc
+    - Data Revisat
+    - Institució
+    - Màquina de la prestació codi
+    - Màquina de la prestació desc
+    - Mes prestació (MM)
+    - Metge Radiologia Docum. Allibera codi
+    - Metge Radiologia Docum. Allibera desc
+    - Nivell 1 codi
+    - Nivell 1 desc
+    - Prestació nivell 9 codi
+    - Prestació nivell 9 desc
+    - UP sol·licitant codi
+    - UP sol·licitant desc
+    - UP sol·licitant entitat proveïdora desc
+    - UT sol·licitant codi
+    - UT sol·licitant desc
+    - Número de prestacions
+    - Centre Codi
+    - Institució Corregida
+    - Màquina Descripció
+    - Prestació descripció
+    - UP Sol·licitant Corregida
+    - UP Sol·licitant Entitat Corregida
+  missing_columns_policy: error
+  duplicate_policy: report
+output:
+  processed_filename: act_compl_processed.csv
+  report_filename: act_compl_report.json
+load:
+  target_table: act_compl
+  load_mode: replace_partition
+  partition_column: data_revisat
+  reload_existing_hash: false
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio
+    - source: Centre SAP codi (Hospital)
+      target: centre_sap_codi
+    - source: Codificació genèrica codi
+      target: codificacio_generica_codi
+    - source: Codificació genèrica desc
+      target: codificacio_generica_descripcio
+    - source: Data Revisat
+      target: data_revisat
+    - source: Institució
+      target: institucio
+    - source: Màquina de la prestació codi
+      target: maquina_prestacio_codi
+    - source: Màquina de la prestació desc
+      target: maquina_prestacio_descripcio
+    - source: Mes prestació (MM)
+      target: mes_prestacio
+    - source: Metge Radiologia Docum. Allibera codi
+      target: metge_radiologia_allibera_codi
+    - source: Metge Radiologia Docum. Allibera desc
+      target: metge_radiologia_allibera_descripcio
+    - source: Nivell 1 codi
+      target: nivell_1_codi
+    - source: Nivell 1 desc
+      target: nivell_1_descripcio
+    - source: Prestació nivell 9 codi
+      target: prestacio_nivell_9_codi
+    - source: Prestació nivell 9 desc
+      target: prestacio_nivell_9_descripcio
+    - source: UP sol·licitant codi
+      target: up_solicitant_codi
+    - source: UP sol·licitant desc
+      target: up_solicitant_descripcio
+    - source: UP sol·licitant entitat proveïdora desc
+      target: up_solicitant_entitat_proveidora_descripcio
+    - source: UT sol·licitant codi
+      target: ut_solicitant_codi
+    - source: UT sol·licitant desc
+      target: ut_solicitant_descripcio
+    - source: Número de prestacions
+      target: numero_prestacions
+    - source: Centre Codi
+      target: centre_codi
+    - source: Institució Corregida
+      target: institucio_corregida
+    - source: Màquina Descripció
+      target: maquina_descripcio
+    - source: Prestació descripció
+      target: prestacio_descripcio
+    - source: UP Sol·licitant Corregida
+      target: up_solicitant_corregida
+    - source: UP Sol·licitant Entitat Corregida
+      target: up_solicitant_entitat_corregida

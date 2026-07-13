@@ -94,6 +94,7 @@ class PostgresqlLoader:
         load_mode = load["load_mode"]
         partition_column = _partition_column(load)
         mapping = _column_mapping(load)
+        reload_existing_hash = bool(load.get("reload_existing_hash", False))
         try:
             source_path = resolve_source_path(config)
         except (FileNotFoundError, SourcePathError) as error:
@@ -138,7 +139,7 @@ class PostgresqlLoader:
                         config.name,
                         target_table,
                         source_hash,
-                        bool(load.get("reload_existing_hash", False)),
+                        reload_existing_hash,
                     )
                     _validate_load_mode_preconditions(
                         cursor, schema, target_table, load_mode
@@ -168,6 +169,7 @@ class PostgresqlLoader:
                         rows_loaded=rows_loaded,
                         status=status,
                         error_message=None,
+                        reload_existing_hash=reload_existing_hash,
                     )
                 _commit(connection)
             except Exception as error:
@@ -191,6 +193,7 @@ class PostgresqlLoader:
                                 rows_loaded=rows_loaded,
                                 status=status,
                                 error_message=error_message,
+                                reload_existing_hash=reload_existing_hash,
                             )
                         _commit(connection)
                     except Exception:
@@ -467,6 +470,7 @@ def _insert_load_control(
     rows_loaded: int,
     status: str,
     error_message: str | None,
+    reload_existing_hash: bool = False,
 ) -> None:
     values = (
         config.name,
@@ -482,11 +486,26 @@ def _insert_load_control(
         datetime.now(timezone.utc),
         error_message,
     )
+    conflict_sql = ""
+    if reload_existing_hash:
+        conflict_columns = ("flow_name", "source_hash", "target_table")
+        update_columns = [
+            column for column in LOAD_CONTROL_COLUMNS if column not in conflict_columns
+        ]
+        conflict_sql = (
+            "\n        on conflict "
+            f"({', '.join(_quote(column) for column in conflict_columns)}) "
+            "do update set "
+            + ", ".join(
+                f"{_quote(column)} = excluded.{_quote(column)}"
+                for column in update_columns
+            )
+        )
     cursor.execute(
         f"""
         insert into {_quote(schema)}.load_control
         ({', '.join(_quote(column) for column in LOAD_CONTROL_COLUMNS)})
-        values ({', '.join(['%s'] * len(LOAD_CONTROL_COLUMNS))})
+        values ({', '.join(['%s'] * len(LOAD_CONTROL_COLUMNS))}){conflict_sql}
         """,
         values,
     )

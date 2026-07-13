@@ -1,0 +1,72 @@
+name: llee_centreprova_prelim
+source:
+  type: xlsx
+  path: llee_mensual.xlsx
+  sheet: LLEE per Centre i Prova
+  header_row: 1
+processing:
+  drop_empty_rows: true
+  drop_empty_columns: true
+  trim_strings: all
+validation:
+  required_columns:
+    - any
+    - mes
+    - Centre
+    - Proves
+    - Prestacions
+    - Pendents de programar
+    - % pendents programar
+    - Mes de 90 dies
+    - % mes 90 dies
+    - Entrades
+    - Sortides
+    - Diferència Entrades-Sortides
+    - Temps de demora (dies)
+    - Temps d'espera (dies)
+    - TD/TE (%)
+  missing_columns_policy: error
+  duplicate_key:
+    - any
+    - mes
+    - Centre
+    - Proves
+  duplicate_policy: report
+output:
+  processed_filename: llee_centreprova_prelim_processed.csv
+  report_filename: llee_centreprova_prelim_report.json
+load:
+  target_table: llee_centre_prova_prelim
+  load_mode: append
+  reload_existing_hash: false
+  column_mapping:
+    - source: any
+      target: any_llee
+    - source: mes
+      target: mes_llee
+    - source: Centre
+      target: centre
+    - source: Proves
+      target: proves
+    - source: Prestacions
+      target: prestacions
+    - source: Pendents de programar
+      target: pendents_programar
+    - source: "% pendents programar"
+      target: percentatge_pendents_programar
+    - source: Mes de 90 dies
+      target: mes_90_dies
+    - source: "% mes 90 dies"
+      target: percentatge_mes_90_dies
+    - source: Entrades
+      target: entrades
+    - source: Sortides
+      target: sortides
+    - source: Diferència Entrades-Sortides
+      target: diferencia_entrades_sortides
+    - source: Temps de demora (dies)
+      target: temps_demora_dies
+    - source: Temps d'espera (dies)
+      target: temps_espera_dies
+    - source: TD/TE (%)
+      target: percentatge_td_te

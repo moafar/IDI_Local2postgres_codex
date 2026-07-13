@@ -108,7 +108,23 @@ class FakeCursor:
             self.result = []
         elif normalized.startswith("insert into \"test\".load_control"):
             row = dict(zip(LOAD_CONTROL_COLUMNS, params or (), strict=False))
-            self.connection.load_control.append(row)
+            if "on conflict" in normalized:
+                for index, existing in enumerate(self.connection.load_control):
+                    if (
+                        existing["flow_name"],
+                        existing["source_hash"],
+                        existing["target_table"],
+                    ) == (
+                        row["flow_name"],
+                        row["source_hash"],
+                        row["target_table"],
+                    ):
+                        self.connection.load_control[index] = row
+                        break
+                else:
+                    self.connection.load_control.append(row)
+            else:
+                self.connection.load_control.append(row)
             self.result = []
         elif normalized.startswith("insert into \"_uptopg_load_staging\""):
             self.connection.staging_rows.append(tuple(params or ()))
@@ -588,6 +604,38 @@ def test_replace_partition_deletes_only_staged_partition_values(
     ]
     assert connection.load_control[-1]["load_mode"] == "replace_partition"
     assert connection.load_control[-1]["status"] == "success"
+
+
+def test_replace_partition_reload_existing_hash_updates_load_control(
+    tmp_path: Path,
+) -> None:
+    connection = FakeConnection()
+    config = base_config(tmp_path, load_mode="replace_partition", partition_column="id")
+    config.data["load"]["reload_existing_hash"] = True
+    connection.rows = [("2025", "Old"), ("2026", "Previous")]
+
+    first = load_to_postgresql(
+        config,
+        pd.DataFrame({"id": ["2026"], "name": ["Current"]}),
+        connection_factory=lambda **_kwargs: connection,
+        password_provider=lambda: "secret",
+        confirm_callback=lambda _message: True,
+    )
+    second = load_to_postgresql(
+        config,
+        pd.DataFrame({"id": ["2026"], "name": ["Reloaded"]}),
+        connection_factory=lambda **_kwargs: connection,
+        password_provider=lambda: "secret",
+        confirm_callback=lambda _message: True,
+    )
+
+    assert second.source_hash == first.source_hash
+    assert connection.deleted_partition_values == {"2026"}
+    assert connection.rows == [("2025", "Old"), ("2026", "Reloaded")]
+    assert len(connection.load_control) == 1
+    assert connection.load_control[0]["rows_loaded"] == 1
+    assert connection.load_control[0]["status"] == "success"
+    assert any("on conflict" in sql.lower() for sql, _params in connection.statements)
 
 
 def test_replace_partition_rolls_back_when_insert_fails(tmp_path: Path) -> None:
