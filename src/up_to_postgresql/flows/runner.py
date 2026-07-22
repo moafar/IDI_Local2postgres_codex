@@ -163,9 +163,35 @@ def _apply_transformations(configured_frame: pd.DataFrame, config: FlowConfig) -
         frame = _trim_strings(frame, "all" if trim_strings is True else trim_strings)
     for transformation in _transformations(config):
         name = transformation["name"]
-        if name != "trim_strings":
-            raise FlowRunError(f"Unsupported transformation {name!r}.")
-        frame = _trim_strings(frame, transformation.get("columns"))
+
+        if name == "trim_strings":
+            frame = _trim_strings(frame, transformation.get("columns"))
+            continue
+
+        if name == "derive_year":
+            source_column = transformation.get("source_column")
+            target_column = transformation.get("target_column")
+
+            if not isinstance(source_column, str) or not source_column:
+                raise FlowRunError(
+                    "Transformation 'derive_year' requires 'source_column'."
+                )
+
+            if not isinstance(target_column, str) or not target_column:
+                raise FlowRunError(
+                    "Transformation 'derive_year' requires 'target_column'."
+                )
+
+            if source_column not in frame.columns:
+                raise FlowRunError(
+                    f"Source column {source_column!r} not found for 'derive_year'."
+                )
+
+            parsed_dates = pd.to_datetime(frame[source_column], errors="coerce")
+            frame[target_column] = parsed_dates.dt.year.astype("Int64").astype("string")
+            continue
+
+        raise FlowRunError(f"Unsupported transformation {name!r}.")
     return frame
 
 

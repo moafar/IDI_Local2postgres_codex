@@ -1,21 +1,35 @@
 name: act_compl
+
 source:
   type: xlsx
-  path: act_compl/_EXT_ACT-COMPL_DATA-REVISAT_202601.xlsx
-  sheet: _activitat_complementaria
+  path: act_compl/_EXTRACCIO_activitat_complementaria_sample.xlsx
+  sheet: activitat_complementaria
   header_row: 2
+
 processing:
   drop_empty_rows: true
   drop_empty_columns: true
   trim_strings: all
+
+transformations:
+  - name: derive_year
+    source_column: Data Revisat
+    target_column: any_revisat
+
 validation:
   required_columns:
     - Any prestació (YYYY)
-    - Centre SAP codi (Hospital)
-    - Codificació genèrica codi
-    - Codificació genèrica desc
     - Data Revisat
+    - Codificació genèrica codi
+    - v_Codificació genèric desc corregida
+    - Centre SAP codi (Hospital)
+    - Centre SAP desc (Hospital)
+    - Data prestació
+    - Dia setmana prestació (desc)
+    - Hora prestació
     - Institució
+    - Interlocutor/Metge sol·licitant codi (ordre)
+    - Interlocutor/Metge sol·licitant desc (ordre)
     - Màquina de la prestació codi
     - Màquina de la prestació desc
     - Mes prestació (MM)
@@ -23,30 +37,45 @@ validation:
     - Metge Radiologia Docum. Allibera desc
     - Nivell 1 codi
     - Nivell 1 desc
+    - Pacient (NHC)
     - Prestació nivell 9 codi
     - Prestació nivell 9 desc
+    - Servei sol·licitant codi (ordre)
+    - Servei sol·licitant desc (ordre)
+    - Tipus episodi codi
     - UP sol·licitant codi
     - UP sol·licitant desc
+    - UP sol·licitant entitat proveïdora codi
     - UP sol·licitant entitat proveïdora desc
+    - UP sol·licitant tipus
+    - UT Gestora codi
+    - UT Gestora desc
     - UT sol·licitant codi
     - UT sol·licitant desc
     - Número de prestacions
-    - Centre Codi
-    - Institució Corregida
-    - Màquina Descripció
-    - Prestació descripció
-    - UP Sol·licitant Corregida
-    - UP Sol·licitant Entitat Corregida
+    - v_Centre Codi
+    - v_Direcció Clínica
+    - v_Institució corregida
+    - v_Màquina descripció
+    - v_Prestació descripció
+    - v_Resum Sol·licitant
+    - v_Torn
+    - v_UP Sol·licitant Corregida
+    - v_UP Sol·licitant Entitat Corregida
+    - v_UT Gestora corregida
   missing_columns_policy: error
   duplicate_policy: report
+
 output:
   processed_filename: act_compl_processed.csv
   report_filename: act_compl_report.json
+
 load:
   target_table: act_compl
   load_mode: replace_partition
-  partition_column: data_revisat
+  partition_column: any_revisat
   reload_existing_hash: false
+
   column_mapping:
     - source: Any prestació (YYYY)
       target: any_prestacio
@@ -54,7 +83,7 @@ load:
       target: centre_sap_codi
     - source: Codificació genèrica codi
       target: codificacio_generica_codi
-    - source: Codificació genèrica desc
+    - source: v_Codificació genèric desc corregida
       target: codificacio_generica_descripcio
     - source: Data Revisat
       target: data_revisat
@@ -90,15 +119,53 @@ load:
       target: ut_solicitant_descripcio
     - source: Número de prestacions
       target: numero_prestacions
-    - source: Centre Codi
+    - source: v_Centre Codi
       target: centre_codi
-    - source: Institució Corregida
+    - source: v_Institució corregida
       target: institucio_corregida
-    - source: Màquina Descripció
+    - source: v_Màquina descripció
       target: maquina_descripcio
-    - source: Prestació descripció
+    - source: v_Prestació descripció
       target: prestacio_descripcio
-    - source: UP Sol·licitant Corregida
+    - source: v_UP Sol·licitant Corregida
       target: up_solicitant_corregida
-    - source: UP Sol·licitant Entitat Corregida
+    - source: v_UP Sol·licitant Entitat Corregida
       target: up_solicitant_entitat_corregida
+    - source: Centre SAP desc (Hospital)
+      target: centre_sap_descripcio
+    - source: Data prestació
+      target: data_prestacio
+    - source: Dia setmana prestació (desc)
+      target: dia_setmana_prestacio
+    - source: Hora prestació
+      target: hora_prestacio
+    - source: Interlocutor/Metge sol·licitant codi (ordre)
+      target: metge_solicitant_codi
+    - source: Interlocutor/Metge sol·licitant desc (ordre)
+      target: metge_solicitant_descripcio
+    - source: Pacient (NHC)
+      target: pacient_nhc
+    - source: Servei sol·licitant codi (ordre)
+      target: servei_solicitant_codi
+    - source: Servei sol·licitant desc (ordre)
+      target: servei_solicitant_descripcio
+    - source: Tipus episodi codi
+      target: tipus_episodi_codi
+    - source: UP sol·licitant entitat proveïdora codi
+      target: up_solicitant_entitat_proveidora_codi
+    - source: UP sol·licitant tipus
+      target: up_solicitant_tipus
+    - source: UT Gestora codi
+      target: ut_gestora_codi
+    - source: UT Gestora desc
+      target: ut_gestora_descripcio
+    - source: v_Direcció Clínica
+      target: direccio_clinica
+    - source: v_Resum Sol·licitant
+      target: resum_solicitant
+    - source: v_Torn
+      target: torn
+    - source: v_UT Gestora corregida
+      target: ut_gestora_corregida
+    - source: any_revisat
+      target: any_revisat
