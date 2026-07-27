@@ -5,8 +5,8 @@ paths:
   output_base_dir: data/output/test
   output_dir: data/output/test
 postgresql:
-  host: localhost
-  port: 5433
+  host: bi-idi.cluster-cvq28ma6cvue.eu-west-1.rds.amazonaws.com
+  port: 5432
   database: data_dbo_idi
-  user: rom
+  user: bi_admin
   schema: test
