@@ -22,4 +22,5 @@ class CsvReader(BaseTabularReader):
             header=header,
             dtype=str,
             keep_default_na=False,
+            engine="python",
         )

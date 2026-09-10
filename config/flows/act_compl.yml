@@ -1,10 +1,11 @@
 name: act_compl
 
 source:
-  type: xlsx
-  path: act_compl/_EXTRACCIO_activitat_complementaria_sample.xlsx
-  sheet: activitat_complementaria
-  header_row: 2
+  type: csv
+  path: activitat_complementaria.csv
+  encoding: utf-8
+  delimiter: ";"
+  header_row: 1
 
 processing:
   drop_empty_rows: true

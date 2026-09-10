@@ -1,7 +1,7 @@
 name: td_ambulatoris
 source:
   type: xlsx
-  path: td.xlsx
+  path: td_ambulatoris.xlsx
   sheet: td_ambulatoris
   header_row: 1
 processing:

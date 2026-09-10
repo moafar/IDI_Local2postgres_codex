@@ -1,6 +1,7 @@
 name: activitat_actual
 source:
   type: csv
+  path: activitat_actual.csv
   encoding: utf-8
   delimiter: ";"
   header_row: 1

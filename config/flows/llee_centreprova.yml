@@ -1,7 +1,7 @@
 name: llee_centreprova
 source:
   type: xlsx
-  path: llee_mensual.xlsx
+  path: llee_centreprova.xlsx
   sheet: LLEE per Centre i Prova
   header_row: 1
 processing:

@@ -1,15 +1,19 @@
 name: td_urgencies
+
 source:
   type: xlsx
-  path: td.xlsx
+  path: td_urgencies.xlsx
   sheet: td_urgencies
   header_row: 1
+
 processing:
   drop_empty_rows: true
   drop_empty_columns: true
   trim_strings: all
+
 validation:
   required_columns:
+    - up_solicitant_codi
     - solicitant
     - any
     - mes
@@ -18,20 +22,24 @@ validation:
     - proves
   missing_columns_policy: error
   duplicate_key:
-    - solicitant
+    - up_solicitant_codi
     - any
     - mes
     - episodi
     - prestació
   duplicate_policy: report
+
 output:
   processed_filename: td_urgencies_processed.csv
   report_filename: td_urgencies_report.json
+
 load:
   target_table: td_urgencies
   load_mode: append
   reload_existing_hash: false
   column_mapping:
+    - source: up_solicitant_codi
+      target: up_solicitant_codi
     - source: solicitant
       target: solicitant
     - source: any

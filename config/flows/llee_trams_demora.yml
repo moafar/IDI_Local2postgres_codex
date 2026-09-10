@@ -1,7 +1,7 @@
 name: llee_trams_demora
 source:
   type: xlsx
-  path: llee_mensual.xlsx
+  path: llee_trams.xlsx
   sheet: Trams demora per Centre i Prova
   header_row: 1
 processing:
