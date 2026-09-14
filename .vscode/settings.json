@@ -1,0 +1,6 @@
+{
+  "yaml.schemaStore.enable": false,
+  "yaml.schemas": {
+    "./config/schemas/flow.schema.json": "config/flows/*.yml"
+  }
+}

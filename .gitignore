@@ -23,7 +23,8 @@ data/output/*
 .ipynb_checkpoints/
 
 # Editores
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 
 # Sistema operativo
