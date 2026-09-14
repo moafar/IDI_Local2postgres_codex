@@ -16,9 +16,9 @@ validation:
     - Proves
     - Prestacions
     - Pendents de programar
-    - % pendents programar
+    - "% pendents programar"
     - Mes de 90 dies
-    - % mes 90 dies
+    - "% mes 90 dies"
     - Entrades
     - Sortides
     - Diferència Entrades-Sortides

@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idi.local/schemas/flow.schema.json",
+  "title": "IDI up_to_postgresql flow",
+  "description": "Esquema para los archivos YAML de configuración de flujos de up_to_postgresql.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "source",
+    "processing",
+    "validation",
+    "output",
+    "load"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Nombre único del flujo."
+    },
+
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+
+    "processing": {
+      "$ref": "#/$defs/processing"
+    },
+
+    "transformations": {
+      "type": "array",
+      "description": "Transformaciones aplicadas antes de la validación/carga.",
+      "items": {
+        "$ref": "#/$defs/transformation"
+      }
+    },
+
+    "validation": {
+      "$ref": "#/$defs/validation"
+    },
+
+    "output": {
+      "$ref": "#/$defs/output"
+    },
+
+    "load": {
+      "$ref": "#/$defs/load"
+    }
+  },
+
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "path"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "xlsx"
+          ],
+          "description": "Formato del archivo de origen."
+        },
+
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre o ruta del archivo de entrada."
+        },
+
+        "sheet": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre de la hoja para archivos XLSX."
+        },
+
+        "header_row": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Fila que contiene las cabeceras."
+        },
+
+        "encoding": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Codificación del archivo CSV, por ejemplo utf-8."
+        },
+
+        "delimiter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1,
+          "description": "Separador de columnas para CSV."
+        }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "csv"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "encoding": {
+                "type": "string"
+              },
+              "delimiter": {
+                "type": "string"
+              }
+            }
+          }
+        },
+
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "xlsx"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sheet": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "drop_empty_rows": {
+          "type": "boolean",
+          "description": "Elimina filas completamente vacías."
+        },
+
+        "drop_empty_columns": {
+          "type": "boolean",
+          "description": "Elimina columnas completamente vacías."
+        },
+
+        "trim_strings": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "description": "Control del recorte de espacios en cadenas."
+        }
+      }
+    },
+
+    "transformation": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre de la transformación."
+        },
+
+        "source_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Columna de origen."
+        },
+
+        "target_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Columna resultante."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_columns",
+        "missing_columns_policy",
+        "duplicate_policy"
+      ],
+      "properties": {
+        "required_columns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Columnas obligatorias del archivo de entrada."
+        },
+
+        "missing_columns_policy": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "ignore"
+          ],
+          "description": "Comportamiento si falta una columna requerida."
+        },
+
+        "duplicate_key": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Columnas que forman la clave utilizada para detectar duplicados."
+        },
+
+        "duplicate_policy": {
+          "type": "string",
+          "enum": [
+            "error",
+            "report",
+            "ignore"
+          ],
+          "description": "Comportamiento ante registros duplicados."
+        }
+      }
+    },
+
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processed_filename",
+        "report_filename"
+      ],
+      "properties": {
+        "processed_filename": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\.csv$",
+          "description": "Nombre del CSV procesado."
+        },
+
+        "report_filename": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\.json$",
+          "description": "Nombre del informe JSON."
+        }
+      }
+    },
+
+    "load": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_table",
+        "load_mode",
+        "column_mapping"
+      ],
+      "properties": {
+        "target_table": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tabla PostgreSQL de destino."
+        },
+
+        "load_mode": {
+          "type": "string",
+          "enum": [
+            "append",
+            "replace_partition",
+            "replace"
+          ],
+          "description": "Modo de carga."
+        },
+
+        "partition_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Columna usada para sustituir una partición lógica."
+        },
+
+        "reload_existing_hash": {
+          "type": "boolean",
+          "description": "Permite recargar una fuente cuyo hash ya existe."
+        },
+
+        "column_mapping": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/columnMapping"
+          },
+          "description": "Mapeo de columnas de origen a columnas PostgreSQL."
+        }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "load_mode": {
+                "const": "replace_partition"
+              }
+            },
+            "required": [
+              "load_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "partition_column"
+            ]
+          }
+        }
+      ]
+    },
+
+    "columnMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre de la columna en el archivo procesado."
+        },
+
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Nombre de la columna de destino en PostgreSQL."
+        }
+      }
+    }
+  }
+}
