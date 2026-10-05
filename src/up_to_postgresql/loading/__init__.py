@@ -5,6 +5,7 @@ from up_to_postgresql.loading.postgresql import (
     PostgresqlLoadError,
     PostgresqlLoadResult,
     load_to_postgresql,
+    prepare_postgresql_load,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "PostgresqlLoadError",
     "PostgresqlLoadResult",
     "load_to_postgresql",
+    "prepare_postgresql_load",
 ]
