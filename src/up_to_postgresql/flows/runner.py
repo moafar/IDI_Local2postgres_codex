@@ -24,6 +24,10 @@ LOGGER = logging.getLogger(__name__)
 VALID_POLICIES = ("error", "warning", "report")
 
 
+def _status(config: FlowConfig, message: str) -> None:
+    print(f"[{config.name} | {config.env}] {message}", flush=True)
+
+
 class FlowRunError(ValueError):
     """Raised when a configured flow cannot be executed."""
 
@@ -59,10 +63,15 @@ def run_flow(
     password_provider: Any | None = None,
     confirm_callback: Any | None = None,
 ) -> FlowRunResult:
+    _status(config, "Iniciando pipeline")
+    _status(config, "Resolviendo archivo de origen")
     source_path = resolve_source_path(config)
+    _status(config, f"Leyendo archivo: {source_path}")
     frame = read_source(config)
+    _status(config, f"{len(frame)} filas x {len(frame.columns)} columnas leídas")
     processing = _processing(config)
     cleaned = frame
+    _status(config, "Limpiando filas y columnas vacías")
     if processing.get("drop_empty_rows", False) or processing.get(
         "drop_empty_columns", False
     ):
@@ -75,12 +84,15 @@ def run_flow(
     empty_columns_removed = tuple(
         str(column) for column in frame.columns if column not in cleaned.columns
     )
+    _status(config, "Aplicando transformaciones")
     transformed = _project_mapped_columns(_apply_transformations(cleaned, config), config)
     validation = _validation(config)
+    _status(config, "Validando columnas requeridas")
     warnings: list[str] = []
     required_columns, missing_required_columns = _check_required_columns(
         validation, transformed, warnings
     )
+    _status(config, "Comprobando duplicados")
     duplicate_key, missing_duplicate_key_columns = _duplicate_key(validation, transformed)
     duplicate_rows = 0
     if missing_duplicate_key_columns:
@@ -100,9 +112,11 @@ def run_flow(
         config, "report_filename", f"{config.name}_report.json"
     )
 
+    _status(config, f"Escribiendo archivo procesado: {processed_path}")
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
     postgresql_result = None
     if load:
+        _status(config, "Iniciando carga a PostgreSQL")
         postgresql_result = load_to_postgresql(
             config,
             transformed,
@@ -110,6 +124,7 @@ def run_flow(
             password_provider=password_provider,
             confirm_callback=confirm_callback,
         )
+        _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
     result = FlowRunResult(
         flow=config.name,
         env=config.env,
@@ -131,10 +146,12 @@ def run_flow(
         report_path=report_path,
         postgresql=postgresql_result,
     )
+    _status(config, f"Escribiendo reporte: {report_path}")
     report_path.write_text(
         json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    _status(config, "Pipeline completado")
     return result
 
 
