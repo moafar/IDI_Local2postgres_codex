@@ -16,6 +16,7 @@ echo
 # PASO 1: Resolución DNS
 # ------------------------------------------------------------
 echo "[1/4] Verificando resolución DNS..."
+echo "Ejecutando: getent ahostsv4 \"$HOST\""
 
 IP=$(getent ahostsv4 "$HOST" | awk 'NR==1 {print $1}')
 
@@ -34,6 +35,7 @@ echo
 # PASO 2: Conectividad TCP al puerto PostgreSQL
 # ------------------------------------------------------------
 echo "[2/4] Verificando conectividad TCP al puerto $PORT..."
+echo "Ejecutando: nc -z -w 10 \"$HOST\" \"$PORT\""
 
 if nc -z -w 5 "$HOST" "$PORT" >/dev/null 2>&1; then
     echo "OK: El puerto $PORT es accesible."
@@ -57,6 +59,7 @@ echo
 # PASO 3: Comprobar que PostgreSQL acepta conexiones
 # ------------------------------------------------------------
 echo "[3/4] Verificando disponibilidad de PostgreSQL..."
+echo "Ejecutando: pg_isready -h \"$HOST\" -p \"$PORT\" -d \"$DB\" -t 10"
 
 PG_STATUS=$(pg_isready -h "$HOST" -p "$PORT" -d "$DB" -t 10 2>&1)
 PG_EXIT=$?
@@ -81,7 +84,8 @@ echo
 read -rsp "Contraseña: " PASSWORD
 echo
 echo
-echo "Intentando conexión..."
+
+echo "Ejecutando: psql \"host=$HOST port=$PORT dbname=$DB user=$USER sslmode=require connect_timeout=10\" -tAc \"SELECT current_user, current_database(), version();\""
 echo
 
 PGPASSWORD="$PASSWORD" psql \

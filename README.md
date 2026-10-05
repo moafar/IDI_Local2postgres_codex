@@ -61,20 +61,13 @@ Reglas relevantes:
 Procesamiento sin carga:
 
 ```bash
-python -m up_to_postgresql \
-  --flow llee_centreprova \
-  --env test \
-  --execute
+python -m up_to_postgresql   --flow llee_centreprova   --env test   --execute   --source llee_centreprova202608.xlsx
 ```
 
 Carga con `--load`:
 
 ```bash
-python -m up_to_postgresql \
-  --flow activitat_actual \
-  --env prd \
-  --execute \
-  --load
+python -m up_to_postgresql   --flow llee_centreprova   --env test   --execute   --load   --source llee_centreprova202608.xlsx
 ```
 
 Carga usando `--source`:
