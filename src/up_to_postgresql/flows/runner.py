@@ -84,13 +84,30 @@ def run_flow(
     empty_columns_removed = tuple(
         str(column) for column in frame.columns if column not in cleaned.columns
     )
+    _status(
+        config,
+        "Limpieza completada: "
+        f"{empty_rows_removed} filas eliminadas, "
+        f"{len(empty_columns_removed)} columnas eliminadas",
+    )
     _status(config, "Aplicando transformaciones")
     transformed = _project_mapped_columns(_apply_transformations(cleaned, config), config)
+    transformation_names = _transformation_names(config)
+    _status(
+        config,
+        "Transformaciones aplicadas: "
+        + (", ".join(transformation_names) if transformation_names else "ninguna"),
+    )
     validation = _validation(config)
     _status(config, "Validando columnas requeridas")
     warnings: list[str] = []
     required_columns, missing_required_columns = _check_required_columns(
         validation, transformed, warnings
+    )
+    _status(
+        config,
+        "Validación de columnas: "
+        + ("OK" if not missing_required_columns else f"faltan {list(missing_required_columns)}"),
     )
     _status(config, "Comprobando duplicados")
     duplicate_key, missing_duplicate_key_columns = _duplicate_key(validation, transformed)
@@ -102,6 +119,7 @@ def run_flow(
     else:
         duplicate_rows = int(transformed.duplicated(keep=False).sum())
     _apply_duplicate_policy(validation, duplicate_rows, missing_duplicate_key_columns, warnings)
+    _status(config, f"Duplicados detectados: {duplicate_rows}")
 
     output_dir = _output_base_dir(config)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +157,7 @@ def run_flow(
         missing_required_columns=tuple(missing_required_columns),
         duplicate_key=tuple(duplicate_key),
         missing_duplicate_key_columns=tuple(missing_duplicate_key_columns),
-        transformations=_transformation_names(config),
+        transformations=transformation_names,
         warnings=tuple(warnings),
         source_path=source_path,
         processed_path=processed_path,
