@@ -15,6 +15,7 @@ from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.loading import (
     PostgresqlLoadResult,
     load_to_postgresql,
+    prepare_postgresql_load,
 )
 from up_to_postgresql.readers import read_source
 from up_to_postgresql.source import resolve_source_path
@@ -64,6 +65,17 @@ def run_flow(
     confirm_callback: Any | None = None,
 ) -> FlowRunResult:
     _status(config, "Iniciando pipeline")
+    prepared_password: str | None = None
+    if load:
+        _status(config, "Preparando carga a PostgreSQL")
+        prepared_password = prepare_postgresql_load(
+            config,
+            password_provider=password_provider,
+            confirm_callback=confirm_callback,
+            password=prepared_password,
+            confirmed=True,
+        )
+        _status(config, "Carga PostgreSQL confirmada")
     _status(config, "Resolviendo archivo de origen")
     source_path = resolve_source_path(config)
     _status(config, f"Leyendo archivo: {source_path}")
