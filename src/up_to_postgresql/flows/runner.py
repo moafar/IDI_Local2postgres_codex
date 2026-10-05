@@ -15,6 +15,7 @@ from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.loading import (
     PostgresqlLoadResult,
     load_to_postgresql,
+    prepare_postgresql_load,
 )
 from up_to_postgresql.readers import read_source
 from up_to_postgresql.source import resolve_source_path
@@ -22,6 +23,10 @@ from up_to_postgresql.source import resolve_source_path
 
 LOGGER = logging.getLogger(__name__)
 VALID_POLICIES = ("error", "warning", "report")
+
+
+def _status(config: FlowConfig, message: str) -> None:
+    print(f"[{config.name} | {config.env}] {message}", flush=True)
 
 
 class FlowRunError(ValueError):
@@ -59,10 +64,24 @@ def run_flow(
     password_provider: Any | None = None,
     confirm_callback: Any | None = None,
 ) -> FlowRunResult:
+    _status(config, "Iniciando pipeline")
+    prepared_password: str | None = None
+    if load:
+        _status(config, "Preparando carga a PostgreSQL")
+        prepared_password = prepare_postgresql_load(
+            config,
+            password_provider=password_provider,
+            confirm_callback=confirm_callback,
+        )
+        _status(config, "Carga PostgreSQL confirmada")
+    _status(config, "Resolviendo archivo de origen")
     source_path = resolve_source_path(config)
+    _status(config, f"Leyendo archivo: {source_path}")
     frame = read_source(config)
+    _status(config, f"{len(frame)} filas x {len(frame.columns)} columnas leídas")
     processing = _processing(config)
     cleaned = frame
+    _status(config, "Limpiando filas y columnas vacías")
     if processing.get("drop_empty_rows", False) or processing.get(
         "drop_empty_columns", False
     ):
@@ -75,12 +94,32 @@ def run_flow(
     empty_columns_removed = tuple(
         str(column) for column in frame.columns if column not in cleaned.columns
     )
+    _status(
+        config,
+        "Limpieza completada: "
+        f"{empty_rows_removed} filas eliminadas, "
+        f"{len(empty_columns_removed)} columnas eliminadas",
+    )
+    _status(config, "Aplicando transformaciones")
     transformed = _project_mapped_columns(_apply_transformations(cleaned, config), config)
+    transformation_names = _transformation_names(config)
+    _status(
+        config,
+        "Transformaciones aplicadas: "
+        + (", ".join(transformation_names) if transformation_names else "ninguna"),
+    )
     validation = _validation(config)
+    _status(config, "Validando columnas requeridas")
     warnings: list[str] = []
     required_columns, missing_required_columns = _check_required_columns(
         validation, transformed, warnings
     )
+    _status(
+        config,
+        "Validación de columnas: "
+        + ("OK" if not missing_required_columns else f"faltan {list(missing_required_columns)}"),
+    )
+    _status(config, "Comprobando duplicados")
     duplicate_key, missing_duplicate_key_columns = _duplicate_key(validation, transformed)
     duplicate_rows = 0
     if missing_duplicate_key_columns:
@@ -90,6 +129,7 @@ def run_flow(
     else:
         duplicate_rows = int(transformed.duplicated(keep=False).sum())
     _apply_duplicate_policy(validation, duplicate_rows, missing_duplicate_key_columns, warnings)
+    _status(config, f"Duplicados detectados: {duplicate_rows}")
 
     output_dir = _output_base_dir(config)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -100,16 +140,21 @@ def run_flow(
         config, "report_filename", f"{config.name}_report.json"
     )
 
+    _status(config, f"Escribiendo archivo procesado: {processed_path}")
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
     postgresql_result = None
     if load:
+        _status(config, "Iniciando carga a PostgreSQL")
         postgresql_result = load_to_postgresql(
             config,
             transformed,
             connection_factory=connection_factory,
             password_provider=password_provider,
             confirm_callback=confirm_callback,
+            password=prepared_password,
+            confirmed=True,
         )
+        _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
     result = FlowRunResult(
         flow=config.name,
         env=config.env,
@@ -124,17 +169,19 @@ def run_flow(
         missing_required_columns=tuple(missing_required_columns),
         duplicate_key=tuple(duplicate_key),
         missing_duplicate_key_columns=tuple(missing_duplicate_key_columns),
-        transformations=_transformation_names(config),
+        transformations=transformation_names,
         warnings=tuple(warnings),
         source_path=source_path,
         processed_path=processed_path,
         report_path=report_path,
         postgresql=postgresql_result,
     )
+    _status(config, f"Escribiendo reporte: {report_path}")
     report_path.write_text(
         json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    _status(config, "Pipeline completado")
     return result
 
 

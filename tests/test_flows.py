@@ -53,6 +53,29 @@ def test_run_flow_cleans_trims_validates_and_reports(tmp_path: Path) -> None:
     assert '"trim_strings"' in result.report_path.read_text(encoding="utf-8")
 
 
+def test_run_flow_reports_pipeline_status(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    pytest.importorskip("pandas")
+    source = tmp_path / "input.csv"
+    source.write_text("id,name\n1,Ana\n", encoding="utf-8")
+    config = FlowConfig(
+        name="sample",
+        env="test",
+        data={
+            "paths": {"input_dir": str(tmp_path), "output_dir": str(tmp_path)},
+            "source": {"type": "csv", "path": "input.csv"},
+        },
+    )
+
+    run_flow(config)
+
+    output = capsys.readouterr().out
+    assert "[sample | test] Iniciando pipeline" in output
+    assert "[sample | test] 1 filas x 2 columnas leídas" in output
+    assert "[sample | test] Aplicando transformaciones" in output
+    assert "[sample | test] Comprobando duplicados" in output
+    assert "[sample | test] Pipeline completado" in output
+
+
 def test_run_flow_rejects_missing_required_columns(tmp_path: Path) -> None:
     pytest.importorskip("pandas")
     source = tmp_path / "input.csv"
