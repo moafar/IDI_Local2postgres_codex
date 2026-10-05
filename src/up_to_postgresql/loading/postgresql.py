@@ -58,6 +58,34 @@ PasswordProvider = Callable[[], str]
 ConfirmCallback = Callable[[str], bool]
 
 
+def prepare_postgresql_load(
+    config: FlowConfig,
+    *,
+    password_provider: PasswordProvider | None = None,
+    confirm_callback: ConfirmCallback | None = None,
+) -> str:
+    postgresql = _postgresql_config(config)
+    load = _load_config(config)
+    schema = _identifier(postgresql["schema"], "postgresql.schema")
+    target_table = _identifier(load["target_table"], "load.target_table")
+    load_mode = load["load_mode"]
+    try:
+        source_path = resolve_source_path(config)
+    except (FileNotFoundError, SourcePathError) as error:
+        raise PostgresqlLoadError(str(error)) from error
+
+    confirm = confirm_callback or _default_confirm_callback
+    message = (
+        f"Load file {source_path} into {schema}.{target_table} "
+        f"using mode {load_mode}?"
+    )
+    if not confirm(message):
+        raise PostgresqlLoadCancelled("PostgreSQL load cancelled by user.")
+
+    provider = password_provider or _default_password_provider
+    return provider()
+
+
 def load_to_postgresql(
     config: FlowConfig,
     frame: pd.DataFrame,
@@ -65,13 +93,15 @@ def load_to_postgresql(
     connection_factory: ConnectionFactory | None = None,
     password_provider: PasswordProvider | None = None,
     confirm_callback: ConfirmCallback | None = None,
+    password: str | None = None,
+    confirmed: bool = False,
 ) -> PostgresqlLoadResult:
     loader = PostgresqlLoader(
         connection_factory=connection_factory,
         password_provider=password_provider,
         confirm_callback=confirm_callback,
     )
-    return loader.load(config, frame)
+    return loader.load(config, frame, password=password, confirmed=confirmed)
 
 
 class PostgresqlLoader:
@@ -86,7 +116,14 @@ class PostgresqlLoader:
         self.password_provider = password_provider or _default_password_provider
         self.confirm_callback = confirm_callback or _default_confirm_callback
 
-    def load(self, config: FlowConfig, frame: pd.DataFrame) -> PostgresqlLoadResult:
+    def load(
+        self,
+        config: FlowConfig,
+        frame: pd.DataFrame,
+        *,
+        password: str | None = None,
+        confirmed: bool = False,
+    ) -> PostgresqlLoadResult:
         postgresql = _postgresql_config(config)
         load = _load_config(config)
         schema = _identifier(postgresql["schema"], "postgresql.schema")
@@ -105,14 +142,16 @@ class PostgresqlLoader:
         status = "success"
         error_message: str | None = None
 
-        message = (
-            f"Load file {source_filename} with {len(frame)} rows into "
-            f"{schema}.{target_table} using mode {load_mode}?"
-        )
-        if not self.confirm_callback(message):
-            raise PostgresqlLoadCancelled("PostgreSQL load cancelled by user.")
+        if not confirmed:
+            message = (
+                f"Load file {source_filename} with {len(frame)} rows into "
+                f"{schema}.{target_table} using mode {load_mode}?"
+            )
+            if not self.confirm_callback(message):
+                raise PostgresqlLoadCancelled("PostgreSQL load cancelled by user.")
 
-        password = self.password_provider()
+        if password is None:
+            password = self.password_provider()
         connection = self.connection_factory(
             host=postgresql["host"],
             port=postgresql["port"],
