@@ -72,8 +72,6 @@ def run_flow(
             config,
             password_provider=password_provider,
             confirm_callback=confirm_callback,
-            password=prepared_password,
-            confirmed=True,
         )
         _status(config, "Carga PostgreSQL confirmada")
     _status(config, "Resolviendo archivo de origen")
@@ -153,6 +151,8 @@ def run_flow(
             connection_factory=connection_factory,
             password_provider=password_provider,
             confirm_callback=confirm_callback,
+            password=prepared_password,
+            confirmed=True,
         )
         _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
     result = FlowRunResult(
