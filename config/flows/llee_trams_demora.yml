@@ -2,7 +2,7 @@ name: llee_trams_demora
 source:
   type: xlsx
   path: llee_trams.xlsx
-  sheet: Trams demora per Centre i Prova
+  sheet: llee_trams
   header_row: 1
 processing:
   drop_empty_rows: true

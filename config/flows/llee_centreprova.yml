@@ -2,7 +2,7 @@ name: llee_centreprova
 source:
   type: xlsx
   path: llee_centreprova.xlsx
-  sheet: LLEE per Centre i Prova
+  sheet: llee_centreprova
   header_row: 1
 processing:
   drop_empty_rows: true
