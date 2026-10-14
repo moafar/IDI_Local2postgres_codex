@@ -180,6 +180,88 @@ def test_password_provider_and_connection_settings(config, fake):
     assert connection.calls == ["commit", "close"]
 
 
+
+def test_progress_reports_completed_phases(config, fake, monkeypatch):
+    """Progress counts completed SQL statements, not rows inside a JOIN."""
+    import up_to_postgresql.flows.demanda_sustituciones as executor
+
+    seen = {"descriptions": [], "completed": 0, "messages": []}
+
+    class FakeProgress:
+        def __init__(self, *, total, desc, unit, dynamic_ncols):
+            assert total == len(build_queries("test"))
+            assert desc == "Sustituciones 2026"
+            assert unit == "fase"
+            assert dynamic_ncols is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def set_postfix_str(self, name, refresh):
+            assert refresh is True
+            seen["descriptions"].append(name)
+
+        def update(self, amount):
+            seen["completed"] += amount
+
+    def fake_tqdm(**kwargs):
+        return FakeProgress(**kwargs)
+
+    fake_tqdm.write = seen["messages"].append
+    monkeypatch.setattr(executor, "tqdm", fake_tqdm)
+    _, factory, _ = fake
+    generar_sustituciones(
+        config, anio=2026, connection_factory=factory, password="unused"
+    )
+    assert seen["descriptions"] == list(build_queries("test"))
+    assert seen["completed"] == len(build_queries("test"))
+    assert len(seen["messages"]) == seen["completed"]
+    assert all(" s" in message for message in seen["messages"])
+
+
+def test_progress_failure_does_not_advance_failed_phase(config, fake, monkeypatch):
+    """A failed SQL statement is reported, then normal rollback takes place."""
+    import up_to_postgresql.flows.demanda_sustituciones as executor
+
+    seen = {"completed": 0, "messages": []}
+
+    class FakeProgress:
+        def __init__(self, **_):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def set_postfix_str(self, *_args, **_kwargs):
+            pass
+
+        def update(self, amount):
+            seen["completed"] += amount
+
+    def fake_tqdm(**kwargs):
+        return FakeProgress(**kwargs)
+
+    fake_tqdm.write = seen["messages"].append
+    monkeypatch.setattr(executor, "tqdm", fake_tqdm)
+    connection, factory, _ = fake
+    queries = build_queries("test")
+    failed = "match"
+    connection.fail_query = queries[failed]
+    with pytest.raises(RuntimeError, match="SQL execution failed"):
+        generar_sustituciones(
+            config, anio=2026, connection_factory=factory, password="unused"
+        )
+    assert seen["completed"] == list(queries).index(failed)
+    assert any(f"{failed}: ERROR" in message for message in seen["messages"])
+    assert connection.calls == ["rollback", "close"]
+
+
 def test_explicit_password_bypasses_provider(config, fake):
     _, factory, captured = fake
     generar_sustituciones(
