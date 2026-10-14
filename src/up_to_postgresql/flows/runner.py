@@ -1,21 +1,37 @@
 # src/up_to_postgresql/flows/runner.py
-"""Run configured file-processing flows."""
+"""Run configured file flows and coordinate demanda's guarded SQL analysis.
+
+Depends on readers, the PostgreSQL loader and the substitutions executor.
+Only demanda loads validate the calendar year and take a session advisory lock;
+other flows retain their existing processing and loading behavior.
+"""
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from datetime import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
+import re
+import sys
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from up_to_postgresql.config.schema import FlowConfig
+from up_to_postgresql.config.schema import FlowConfig, validate_flow_config
+from up_to_postgresql.flows.demanda_sustituciones import generar_sustituciones
 from up_to_postgresql.loading import (
     PostgresqlLoadResult,
     load_to_postgresql,
     prepare_postgresql_load,
+)
+from up_to_postgresql.loading.postgresql import (
+    _default_connection_factory,
+    _postgresql_config,
 )
 from up_to_postgresql.readers import read_source
 from up_to_postgresql.source import resolve_source_path
@@ -66,7 +82,8 @@ def run_flow(
 ) -> FlowRunResult:
     _status(config, "Iniciando pipeline")
     prepared_password: str | None = None
-    if load:
+    demanda_load = load and config.name == "demanda"
+    if load and not demanda_load:
         _status(config, "Preparando carga a PostgreSQL")
         prepared_password = prepare_postgresql_load(
             config,
@@ -131,6 +148,20 @@ def run_flow(
     _apply_duplicate_policy(validation, duplicate_rows, missing_duplicate_key_columns, warnings)
     _status(config, f"Duplicados detectados: {duplicate_rows}")
 
+    if demanda_load:
+        validate_flow_config(config.data, expected_name="demanda", env=config.env)
+    anio_demanda = _demanda_year(config, transformed) if demanda_load else None
+    if demanda_load:
+        _status(config, "Preparando carga a PostgreSQL")
+        prepared_password = prepare_postgresql_load(
+            config,
+            password_provider=password_provider,
+            confirm_callback=confirm_callback,
+        )
+        if prepared_password is None:
+            raise FlowRunError("La contraseña de PostgreSQL no está disponible")
+        _status(config, "Carga PostgreSQL confirmada")
+
     output_dir = _output_base_dir(config)
     output_dir.mkdir(parents=True, exist_ok=True)
     processed_path = output_dir / _output_name(
@@ -144,17 +175,35 @@ def run_flow(
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
     postgresql_result = None
     if load:
-        _status(config, "Iniciando carga a PostgreSQL")
-        postgresql_result = load_to_postgresql(
-            config,
-            transformed,
-            connection_factory=connection_factory,
-            password_provider=password_provider,
-            confirm_callback=confirm_callback,
-            password=prepared_password,
-            confirmed=True,
+        lock = (
+            _demanda_advisory_lock(config, connection_factory, prepared_password)
+            if demanda_load
+            else nullcontext()
         )
-        _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
+        with lock:
+            _status(config, "Iniciando carga a PostgreSQL")
+            postgresql_result = load_to_postgresql(
+                config,
+                transformed,
+                connection_factory=connection_factory,
+                password_provider=password_provider,
+                confirm_callback=confirm_callback,
+                password=prepared_password,
+                confirmed=True,
+            )
+            if demanda_load:
+                if postgresql_result.status != "success":
+                    raise FlowRunError("La carga de demanda no finalizó satisfactoriamente")
+            _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
+            if demanda_load:
+                _status(config, f"Generando sustituciones de {anio_demanda}")
+                generar_sustituciones(
+                    config,
+                    anio=anio_demanda,
+                    connection_factory=connection_factory,
+                    password=prepared_password,
+                )
+                _status(config, "Sustituciones generadas")
     result = FlowRunResult(
         flow=config.name,
         env=config.env,
@@ -183,6 +232,95 @@ def run_flow(
     )
     _status(config, "Pipeline completado")
     return result
+
+
+def _current_demanda_year() -> int:
+    return datetime.now(ZoneInfo("Europe/Madrid")).year
+
+
+def _demanda_year(config: FlowConfig, frame: pd.DataFrame) -> int:
+    load_config = config.data.get("load")
+    if not isinstance(load_config, dict):
+        raise FlowRunError("demanda requiere configuración de carga")
+    mapping = load_config.get("column_mapping")
+    if not isinstance(mapping, list):
+        raise FlowRunError("demanda requiere load.column_mapping")
+    source_columns = [
+        item.get("source") for item in mapping
+        if isinstance(item, dict) and item.get("target") == "any_prestacio"
+    ]
+    if len(source_columns) != 1 or source_columns[0] not in frame.columns:
+        raise FlowRunError("demanda requiere un mapeo válido de any_prestacio")
+    years = set()
+    for value in frame[source_columns[0]]:
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}", value):
+            raise FlowRunError("demanda requiere un año de cuatro dígitos en cada fila")
+        year = int(value)
+        if year == 0:
+            raise FlowRunError("demanda contiene un año inválido")
+        years.add(year)
+    if len(years) != 1:
+        raise FlowRunError("demanda requiere un único año en el archivo")
+    year = years.pop()
+    if year != _current_demanda_year():
+        raise FlowRunError("La carga automática de demanda requiere el año calendario actual")
+    return year
+
+
+def _demanda_lock_key(schema: str) -> int:
+    # First eight SHA-256 bytes, signed big-endian: stable across processes.
+    digest = hashlib.sha256(f"up_to_postgresql:demanda:{schema}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+@contextmanager
+def _demanda_advisory_lock(config: FlowConfig, connection_factory: Any, password: str):
+    postgresql = _postgresql_config(config)
+    schema = postgresql["schema"]
+    key = _demanda_lock_key(schema)
+    connection = (connection_factory or _default_connection_factory)(
+        host=postgresql["host"],
+        port=postgresql["port"],
+        dbname=postgresql["database"],
+        user=postgresql["user"],
+        password=password,
+    )
+    acquired = False
+    try:
+        connection.autocommit = True
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+            row = cursor.fetchone()
+        if row is None or row[0] is not True:
+            raise FlowRunError(f"Ya hay una carga de demanda en curso en {schema}")
+        acquired = True
+        yield
+    finally:
+        active_error = sys.exc_info()[1]
+        release_error = None
+        if acquired:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
+                    row = cursor.fetchone()
+                if row is None or row[0] is not True:
+                    raise FlowRunError("No se pudo liberar el bloqueo de demanda")
+            except Exception as error:
+                release_error = error
+        try:
+            connection.close()
+        except Exception as error:
+            if release_error is None:
+                release_error = error
+            else:
+                release_error.add_note(f"Close failed: {type(error).__name__}")
+        if release_error is not None:
+            if active_error is not None:
+                active_error.add_note(
+                    f"Advisory lock cleanup failed: {type(release_error).__name__}"
+                )
+            else:
+                raise release_error
 
 
 def _drop_empty(
