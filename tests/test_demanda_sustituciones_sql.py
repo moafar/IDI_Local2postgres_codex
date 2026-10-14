@@ -81,6 +81,14 @@ def test_schema_is_quoted_and_only_context_requires_parameters() -> None:
         list(queries).index(name) < list(queries).index("delete_year")
         for name in validation_steps
     )
+    assert list(queries).index("validate_identities") < list(queries).index(
+        "index_occurrences"
+    ) < list(queries).index("analyze_occurrences") < list(queries).index("match")
+    assert "CREATE UNIQUE INDEX" in queries["index_occurrences"]
+    assert "ON pg_temp._ds_occurrences (id_registro)" in queries["index_occurrences"]
+    assert list(queries).index("generate") < list(queries).index(
+        "analyze_result"
+    ) < list(queries).index("validate_result_parejas_admisibles")
     assert list(queries)[-1] == "validate_published"
 
 
