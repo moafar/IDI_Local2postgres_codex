@@ -1,8 +1,13 @@
-"""Acceptance coverage for the remaining real PostgreSQL-bound flows."""
+"""Verify configured flow contracts and file processing without database writes.
+
+Uses local fixtures and flow configuration; the demanda fixture follows its CSV
+contract. PostgreSQL loading is outside this module's tests.
+"""
 
 from __future__ import annotations
 
 import copy
+import csv
 import json
 from pathlib import Path
 
@@ -148,9 +153,8 @@ FLOW_CASES = {
         ],
     },
     "demanda": {
-        "source": "demanda._samplexlsx.xlsx",
-        "sheet": "Demanda",
-        "shape": (9, 23),
+        "source": "Demanda.csv",
+        "shape": (1, 23),
         "target_table": "demanda",
         "load_mode": "replace_partition",
         "partition_column": "any_prestacio",
@@ -241,21 +245,12 @@ DEMANDA_SOURCE_COLUMNS = [
 ]
 
 
-def _build_demanda_xlsx(tmp_path: Path) -> Path:
-    pytest.importorskip("openpyxl")
-    from openpyxl import Workbook
-
-    source = tmp_path / "demanda_contract.xlsx"
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Demanda"
-
-    headers = [None, *DEMANDA_SOURCE_COLUMNS]
+def _build_demanda_csv(tmp_path: Path) -> Path:
+    source = tmp_path / "Demanda.csv"
     row = [
-        None,
         "2026",
         "01",
-        "2026-01-15",
+        "15/01/26",
         "1",
         "H01",
         "C01",
@@ -278,12 +273,10 @@ def _build_demanda_xlsx(tmp_path: Path) -> Path:
         "NHC-001",
     ]
 
-    for column_index, value in enumerate(headers, start=1):
-        sheet.cell(row=2, column=column_index, value=value)
-    for column_index, value in enumerate(row, start=1):
-        sheet.cell(row=3, column=column_index, value=value)
-
-    workbook.save(source)
+    with source.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file, delimiter=";")
+        writer.writerow(DEMANDA_SOURCE_COLUMNS)
+        writer.writerow(row)
     return source
 
 
@@ -291,16 +284,23 @@ def _build_demanda_xlsx(tmp_path: Path) -> Path:
 def test_remaining_real_flow_config_contract(flow_name: str) -> None:
     case = FLOW_CASES[flow_name]
     config = resolve_flow_config(flow_name, "test")
-    expected_header_row = 2 if flow_name == "demanda" else 1
-
-    assert config.data["source"] == {
-        "encoding": "utf-8",
-        "delimiter": ",",
-        "type": "xlsx",
-        "path": case["source"],
-        "sheet": case["sheet"],
-        "header_row": expected_header_row,
-    }
+    if flow_name == "demanda":
+        assert config.data["source"] == {
+            "encoding": "utf-8",
+            "delimiter": ";",
+            "type": "csv",
+            "path": case["source"],
+            "header_row": 1,
+        }
+    else:
+        assert config.data["source"] == {
+            "encoding": "utf-8",
+            "delimiter": ",",
+            "type": "xlsx",
+            "path": case["source"],
+            "sheet": case["sheet"],
+            "header_row": 1,
+        }
     assert config.data["processing"] == {
         "drop_empty_rows": True,
         "drop_empty_columns": True,
@@ -325,28 +325,22 @@ def test_remaining_real_flow_config_contract(flow_name: str) -> None:
 
 
 @pytest.mark.parametrize("flow_name", FLOW_CASES)
-def test_remaining_real_flow_reads_expected_xlsx_columns(
+def test_remaining_real_flow_reads_expected_columns(
     flow_name: str, tmp_path: Path
 ) -> None:
     pytest.importorskip("pandas")
-    pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
     config = resolve_flow_config(flow_name, "test")
 
     if flow_name == "demanda":
-        source = _build_demanda_xlsx(tmp_path)
+        _build_demanda_csv(tmp_path)
         data = copy.deepcopy(config.data)
         data["paths"]["input_base_dir"] = str(tmp_path)
-        data["source"] = {
-            "type": "xlsx",
-            "path": source.name,
-            "sheet": "Demanda",
-            "header_row": 2,
-        }
         config = FlowConfig(name=config.name, env=config.env, data=data)
-        source_shape = (1, 24)
-        source_columns = ["Unnamed: 0", *DEMANDA_SOURCE_COLUMNS]
+        source_shape = (1, 23)
+        source_columns = DEMANDA_SOURCE_COLUMNS
     else:
+        pytest.importorskip("openpyxl")
         source_shape = case.get("source_shape", case["shape"])
         source_columns = case.get("source_columns", case["columns"])
         source = Path("data/input/test") / str(case["source"])
@@ -363,27 +357,22 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     flow_name: str, tmp_path: Path
 ) -> None:
     pytest.importorskip("pandas")
-    pytest.importorskip("openpyxl")
     case = FLOW_CASES[flow_name]
     source_shape = case.get("source_shape", case["shape"])
     rows_written = case["shape"][0]
     columns_written = case["shape"][1]
     config = resolve_flow_config(flow_name, "test")
     if flow_name == "demanda":
-        source = _build_demanda_xlsx(tmp_path)
+        _build_demanda_csv(tmp_path)
         data = copy.deepcopy(config.data)
         data["paths"]["input_base_dir"] = str(tmp_path)
         data["paths"]["output_base_dir"] = str(tmp_path / "output")
-        data["source"] = {
-            "type": "xlsx",
-            "path": source.name,
-            "sheet": "Demanda",
-            "header_row": 2,
-        }
         config = FlowConfig(name=config.name, env=config.env, data=data)
-        source_shape = (1, 24)
+        source_shape = (1, 23)
         rows_written = 1
         columns_written = 23
+    else:
+        pytest.importorskip("openpyxl")
     config.data["paths"]["output_base_dir"] = str(tmp_path)
 
     result = run_flow(config)
@@ -394,7 +383,7 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     assert result.columns_written == columns_written
     assert result.empty_rows_removed == 0
     if flow_name == "demanda":
-        assert result.empty_columns_removed == ("Unnamed: 0",)
+        assert result.empty_columns_removed == ()
     else:
         assert result.empty_columns_removed == tuple(case.get("empty_columns_removed", []))
     assert result.duplicate_rows == case["duplicate_rows"]
@@ -406,7 +395,6 @@ def test_remaining_real_flow_writes_outputs_without_loading(
     assert report["duplicate_rows"] == case["duplicate_rows"]
     assert report["postgresql"] == {"status": "skipped"}
     if flow_name == "demanda":
-        assert result.empty_columns_removed == ("Unnamed: 0",)
         processed = result.processed_path.read_text(encoding="utf-8").splitlines()
         assert processed[0].split(",") == DEMANDA_SOURCE_COLUMNS
         assert processed[1].split(",")[0] == "2026"
