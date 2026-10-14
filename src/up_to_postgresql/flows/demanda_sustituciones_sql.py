@@ -324,7 +324,8 @@ def build_queries(schema: str) -> dict[str, str]:
             THEN r.prestacio_nivell_9_codi_al = r.prestacio_nivell_9_codi_candidata
             ELSE NULL::boolean END
     """
-    queries["validate_result"] = _assertions(checks)
+    for name, check_sql in checks.items():
+        queries[f"validate_result_{name}"] = _assertions({name: check_sql})
     queries["track_changes"] = """
         CREATE TEMP TABLE _ds_affected (
             operacion text NOT NULL, any_prestacio smallint NOT NULL, filas bigint NOT NULL

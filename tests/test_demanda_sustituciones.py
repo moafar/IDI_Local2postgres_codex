@@ -292,8 +292,15 @@ def test_sql_order_parameters_and_al_occurrence_counts(config, fake):
     assert connection.calls == ["commit", "close"]
 
 
-@pytest.mark.parametrize("failed_step", ["validate_source", "validate_result",
-                                        "delete_year", "validate_published"])
+@pytest.mark.parametrize(
+    "failed_step",
+    [
+        "validate_source",
+        "validate_result_parejas_completas",
+        "delete_year",
+        "validate_published",
+    ],
+)
 def test_sql_failure_rolls_back(config, fake, failed_step):
     connection, factory, _ = fake
     connection.fail_query = build_queries("test")[failed_step]

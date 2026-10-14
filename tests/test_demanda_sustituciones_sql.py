@@ -72,7 +72,15 @@ def test_schema_is_quoted_and_only_context_requires_parameters() -> None:
     )
     assert [name for name, query in queries.items() if "%(" in query] == ["context"]
     assert list(queries).index("validate_source") < list(queries).index("identify")
-    assert list(queries).index("validate_result") < list(queries).index("delete_year")
+    validation_steps = [
+        name for name in queries
+        if name.startswith("validate_result_")
+    ]
+    assert validation_steps
+    assert all(
+        list(queries).index(name) < list(queries).index("delete_year")
+        for name in validation_steps
+    )
     assert list(queries)[-1] == "validate_published"
 
 
@@ -161,7 +169,7 @@ def _load(database, rows):
     )
 
 
-def _calculate(database, *, year=2026, stop="validate_result"):
+def _calculate(database, *, year=2026, stop="track_changes"):
     cursor, schema = database
     for name, query in build_queries(schema).items():
         cursor.execute(query, {"anio": year} if name == "context" else None)
@@ -542,7 +550,7 @@ def test_postgres_validation_rejects_corrupted_results(
     _calculate(database, stop="generate")
     cursor.execute(mutation)
     with pytest.raises(psycopg.errors.CheckViolation, match=expected):
-        cursor.execute(build_queries(schema)["validate_result"])
+        cursor.execute(build_queries(schema)[f"validate_result_{expected}"])
 
 
 def test_postgres_validation_rejects_forged_occurrence_identity(database) -> None:
