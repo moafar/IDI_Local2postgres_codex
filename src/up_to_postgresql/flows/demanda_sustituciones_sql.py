@@ -221,6 +221,10 @@ def build_queries(schema: str) -> dict[str, str]:
                 "WHERE ordinal IS NULL OR ordinal < 1 OR ordinal > repeticiones",
             }
         ),
+        "index_occurrences": """
+            CREATE UNIQUE INDEX _ds_occurrences_id_registro_idx
+            ON pg_temp._ds_occurrences (id_registro);
+        """,
         "analyze_occurrences": """
             ANALYZE pg_temp._ds_occurrences;
         """,
@@ -237,6 +241,9 @@ def build_queries(schema: str) -> dict[str, str]:
             LEFT JOIN pg_temp._ds_pairs p ON p.id_al = a.id_registro
             LEFT JOIN pg_temp._ds_occurrences b ON b.id_registro = p.id_candidata
             WHERE a.prestacio_estat_codi = 'AL';
+        """,
+        "analyze_result": """
+            ANALYZE pg_temp._ds_result;
         """,
     }
     checks = {
