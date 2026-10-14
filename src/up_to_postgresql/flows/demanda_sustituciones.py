@@ -3,6 +3,8 @@
 Depends on the existing flow configuration, loader connection conventions and
 demanda_sustituciones_sql. Requires a pre-created result table; it performs no
 DDL, calendar authorization, locking, pipeline reporting or other ETL changes.
+Close errors after COMMIT retain the original exception and mark that COMMIT
+was confirmed, so pipeline reports cannot imply an analytical rollback.
 """
 
 from __future__ import annotations
@@ -190,7 +192,12 @@ def generar_sustituciones(
         except Exception as close_error:
             error.add_note(f"Close failed: {type(close_error).__name__}")
         raise
-    connection.close()
+    try:
+        connection.close()
+    except BaseException as error:
+        error.demanda_sustituciones_commit_confirmed = True
+        error.add_note("Analytical COMMIT succeeded; connection close failed")
+        raise
     return DemandaSustitucionesResult(
         anio_procesado=anio,
         version_algoritmo=ALGORITHM_VERSION,

@@ -1,8 +1,8 @@
-"""Test demanda's automatic year gate and session-wide advisory lock.
+"""Test automatic and manual demanda orchestration, reports and lock behavior.
 
-Depends on pytest, pandas and the real flow configuration; injected database
-fakes verify ordering without contacting Aurora. Optional lock integration uses
-only local uptopg_test over the Unix socket and writes no database tables.
+Depends on pytest, pandas and the real flow configuration. Injected database
+fakes verify ordering without Aurora; optional lock integration uses only
+local uptopg_test over the Unix socket and writes no database tables.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from copy import deepcopy
 import csv
 from dataclasses import replace
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 
@@ -21,6 +22,7 @@ import pytest
 from up_to_postgresql.config.resolver import resolve_flow_config
 from up_to_postgresql.config.schema import FlowConfig
 from up_to_postgresql.flows import runner
+from up_to_postgresql.flows.demanda_sustituciones import DemandaSustitucionesResult
 from up_to_postgresql.flows.runner import FlowRunError, run_flow
 from up_to_postgresql.loading import PostgresqlLoadResult
 
@@ -112,6 +114,15 @@ def _loaded(config: FlowConfig) -> PostgresqlLoadResult:
     )
 
 
+def _analyzed(year: int = 2026) -> DemandaSustitucionesResult:
+    return DemandaSustitucionesResult(
+        anio_procesado=year, version_algoritmo="1.0.0", registros_al=2,
+        candidatas_unicas=1, candidatas_multiples=0, sin_candidata=1,
+        registros_agregados=0, relaciones_generadas=1, duracion_segundos=0.1,
+        estado="success",
+    )
+
+
 def test_demand_load_runs_two_phases_under_one_lock(tmp_path, monkeypatch):
     config = _demanda_config(tmp_path, ["2026"])
     registry = LockRegistry()
@@ -130,6 +141,7 @@ def test_demand_load_runs_two_phases_under_one_lock(tmp_path, monkeypatch):
         assert anio == 2026
         assert kwargs["password"] == "secret"
         registry.events.append("analysis_commit")
+        return _analyzed(anio)
 
     monkeypatch.setattr(runner, "load_to_postgresql", load)
     monkeypatch.setattr(runner, "generar_sustituciones", analyze)
@@ -145,6 +157,10 @@ def test_demand_load_runs_two_phases_under_one_lock(tmp_path, monkeypatch):
                                "unlock", "close"]
     assert registry.active == set()
     assert registry.connections[0].closed
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["postgresql"]["status"] == "success"
+    assert report["demanda_sustituciones"]["relaciones_generadas"] == 1
+    assert report["estado_ejecucion"] == "success"
 
 
 @pytest.mark.parametrize("years", [[], [""], [None], ["202x"], ["0000"],
@@ -163,7 +179,10 @@ def test_invalid_or_historical_year_cannot_start_load(tmp_path, monkeypatch, yea
                  connection_factory=lambda **_: pytest.fail("unexpected connection"),
                  password_provider=lambda: pytest.fail("unexpected password prompt"),
                  confirm_callback=lambda _: pytest.fail("unexpected confirmation"))
-    assert not (tmp_path / "output" / "demanda_report.json").exists()
+    report = json.loads((tmp_path / "output" / "demanda_report.json").read_text())
+    assert report["estado_ejecucion"] == "error"
+    assert report["postgresql"]["status"] == "skipped"
+    assert report["demanda_sustituciones"]["registros_al"] is None
 
 
 def test_year_is_read_from_mapping_not_a_fixed_header(tmp_path, monkeypatch):
@@ -237,6 +256,7 @@ def test_other_flow_load_uses_existing_path(tmp_path, monkeypatch):
     )
     assert events == ["prepare", "load"]
     assert result.postgresql is not None
+    assert "demanda_sustituciones" not in json.loads(result.report_path.read_text())
 
 
 @pytest.mark.parametrize("stage", ["load", "analysis"])
@@ -267,7 +287,164 @@ def test_failure_releases_lock_and_preserves_transaction_boundary(
     assert loaded == ([] if stage == "load" else [True])
     assert registry.events[-2:] == ["unlock", "close"]
     assert not registry.active
-    assert not (tmp_path / "output" / "demanda_report.json").exists()
+    report = json.loads((tmp_path / "output" / "demanda_report.json").read_text())
+    assert report["estado_ejecucion"] == "error"
+    assert report["postgresql"]["status"] == ("error" if stage == "load" else "success")
+    assert report["demanda_sustituciones"]["registros_al"] is None
+    assert report["error"]["commit_demanda_confirmado"] == (
+        None if stage == "load" else True
+    )
+    assert report["error"]["commit_sustituciones_confirmado"] is None
+
+
+def test_manual_historical_recalculation_skips_file_and_load(tmp_path, monkeypatch):
+    config = _demanda_config(tmp_path, ["2026"])
+    (tmp_path / "demanda.csv").unlink()
+    registry = LockRegistry()
+    prompts = []
+    passwords = []
+    monkeypatch.setattr(
+        runner, "read_source", lambda *_: pytest.fail("unexpected file read")
+    )
+    monkeypatch.setattr(
+        runner, "load_to_postgresql", lambda *_, **__: pytest.fail("unexpected load")
+    )
+
+    def analyze(config, *, anio, **kwargs):
+        assert anio == 2025
+        assert registry.active == {runner._demanda_lock_key("test")}
+        assert kwargs["password"] == "secret"
+        return _analyzed(anio)
+
+    monkeypatch.setattr(runner, "generar_sustituciones", analyze)
+    result = runner.recalcular_demanda_sustituciones(
+        config, anio=2025, connection_factory=registry.connect,
+        password_provider=lambda: passwords.append(True) or "secret",
+        confirm_callback=lambda message: prompts.append(message) or True,
+    )
+    assert "test.demanda_sustituciones" in prompts[0]
+    assert "2025" in prompts[0]
+    assert passwords == [True]
+    assert result.sustituciones.anio_procesado == 2025
+    assert result.report_path.name == "demanda_sustituciones_recalculo_2025.json"
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["modo"] == "recalculo_manual"
+    assert report["carga_archivo_ejecutada"] is False
+    assert report["postgresql"]["status"] == "skipped"
+    assert report["demanda_sustituciones"]["registros_al"] == 2
+    assert "rows_read" not in report
+    assert registry.events == ["lock", "unlock", "close"]
+
+
+def test_manual_cancellation_prevents_connection(tmp_path, monkeypatch):
+    config = _demanda_config(tmp_path, ["2026"])
+    monkeypatch.setattr(
+        runner, "generar_sustituciones", lambda *_, **__: pytest.fail("unexpected analysis")
+    )
+    with pytest.raises(FlowRunError, match="cancelado"):
+        runner.recalcular_demanda_sustituciones(
+            config, anio=2025,
+            connection_factory=lambda **_: pytest.fail("unexpected connection"),
+            password_provider=lambda: pytest.fail("unexpected password prompt"),
+            confirm_callback=lambda _: False,
+        )
+    report_path = tmp_path / "output" / "demanda_sustituciones_recalculo_2025.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["estado_ejecucion"] == "error"
+    assert report["postgresql"]["status"] == "skipped"
+
+
+def test_manual_failure_releases_lock_and_reports_unknown_metrics(tmp_path, monkeypatch):
+    config = _demanda_config(tmp_path, ["2026"])
+    registry = LockRegistry()
+
+    def fail_analysis(*_, **__):
+        assert registry.active
+        raise RuntimeError("analytical transaction rolled back")
+
+    monkeypatch.setattr(runner, "generar_sustituciones", fail_analysis)
+    with pytest.raises(RuntimeError, match="rolled back"):
+        runner.recalcular_demanda_sustituciones(
+            config, anio=2025, connection_factory=registry.connect,
+            password_provider=lambda: "secret", confirm_callback=lambda _: True,
+        )
+    assert not registry.active
+    report = json.loads((tmp_path / "output" /
+                         "demanda_sustituciones_recalculo_2025.json").read_text())
+    assert report["postgresql"]["status"] == "skipped"
+    assert report["demanda_sustituciones"]["estado"] == "error"
+    assert report["demanda_sustituciones"]["registros_al"] is None
+    assert report["error"]["commit_sustituciones_confirmado"] is None
+
+
+def test_analytical_close_error_reports_confirmed_commit(tmp_path, monkeypatch):
+    config = _demanda_config(tmp_path, ["2026"])
+    registry = LockRegistry()
+    monkeypatch.setattr(runner, "_current_demanda_year", lambda: 2026)
+    monkeypatch.setattr(runner, "load_to_postgresql",
+                        lambda config, frame, **kwargs: _loaded(config))
+
+    def fail_after_commit(*_, **__):
+        error = RuntimeError("close failed")
+        error.demanda_sustituciones_commit_confirmed = True
+        raise error
+
+    monkeypatch.setattr(runner, "generar_sustituciones", fail_after_commit)
+    with pytest.raises(RuntimeError, match="close failed"):
+        run_flow(config, load=True, connection_factory=registry.connect,
+                 password_provider=lambda: "secret", confirm_callback=lambda _: True)
+    report = json.loads((tmp_path / "output" / "demanda_report.json").read_text())
+    assert report["postgresql"]["status"] == "success"
+    assert report["demanda_sustituciones"]["registros_al"] is None
+    assert report["error"]["commit_demanda_confirmado"] is True
+    assert report["error"]["commit_sustituciones_confirmado"] is True
+
+
+def test_manual_and_automatic_paths_share_lock(tmp_path, monkeypatch):
+    config = _demanda_config(tmp_path, ["2026"])
+    registry = LockRegistry()
+    monkeypatch.setattr(
+        runner, "generar_sustituciones", lambda *_, **__: pytest.fail("unexpected analysis")
+    )
+    with runner._demanda_advisory_lock(config, registry.connect, "secret"):
+        with pytest.raises(FlowRunError, match="Ya hay una carga"):
+            runner.recalcular_demanda_sustituciones(
+                config, anio=2025, connection_factory=registry.connect,
+                password_provider=lambda: "secret", confirm_callback=lambda _: True,
+            )
+    assert not registry.active
+    assert all(connection.closed for connection in registry.connections)
+
+
+def test_report_failure_does_not_claim_complete_pipeline(tmp_path, monkeypatch, capsys):
+    config = _demanda_config(tmp_path, ["2026"])
+    registry = LockRegistry()
+    monkeypatch.setattr(runner, "_current_demanda_year", lambda: 2026)
+    monkeypatch.setattr(runner, "load_to_postgresql",
+                        lambda config, frame, **kwargs: _loaded(config))
+    monkeypatch.setattr(runner, "generar_sustituciones",
+                        lambda config, *, anio, **kwargs: _analyzed(anio))
+    original_write = runner._write_json_report
+    attempts = []
+
+    def fail_once(path, report):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise FlowRunError("report write failed")
+        return original_write(path, report)
+
+    monkeypatch.setattr(runner, "_write_json_report", fail_once)
+    with pytest.raises(FlowRunError, match="report write failed"):
+        run_flow(config, load=True, connection_factory=registry.connect,
+                 password_provider=lambda: "secret", confirm_callback=lambda _: True)
+    assert "Pipeline completado" not in capsys.readouterr().out
+    assert not registry.active
+    report = json.loads((tmp_path / "output" / "demanda_report.json").read_text())
+    assert report["estado_ejecucion"] == "error"
+    assert report["error"]["stage"] == "reporte"
+    assert report["postgresql"]["status"] == "success"
+    assert report["demanda_sustituciones"]["estado"] == "success"
+    assert report["error"]["commit_sustituciones_confirmado"] is True
 
 
 def test_non_successful_load_cannot_start_analysis(tmp_path, monkeypatch):

@@ -1,15 +1,15 @@
 # src/up_to_postgresql/flows/runner.py
-"""Run configured file flows and coordinate demanda's guarded SQL analysis.
+"""Run configured file flows and coordinate guarded demanda analysis.
 
 Depends on readers, the PostgreSQL loader and the substitutions executor.
-Only demanda loads validate the calendar year and take a session advisory lock;
+Only demanda uses year validation, session locking and analytical reports;
 other flows retain their existing processing and loading behavior.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
 import json
@@ -23,14 +23,19 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from up_to_postgresql.config.schema import FlowConfig, validate_flow_config
-from up_to_postgresql.flows.demanda_sustituciones import generar_sustituciones
+from up_to_postgresql.flows.demanda_sustituciones import (
+    DemandaSustitucionesResult,
+    generar_sustituciones,
+)
 from up_to_postgresql.loading import (
     PostgresqlLoadResult,
     load_to_postgresql,
     prepare_postgresql_load,
 )
 from up_to_postgresql.loading.postgresql import (
+    _default_confirm_callback,
     _default_connection_factory,
+    _default_password_provider,
     _postgresql_config,
 )
 from up_to_postgresql.readers import read_source
@@ -70,6 +75,22 @@ class FlowRunResult:
     processed_path: Path
     report_path: Path
     postgresql: PostgresqlLoadResult | None = None
+    demanda_sustituciones: DemandaSustitucionesResult | None = None
+
+
+@dataclass(frozen=True)
+class DemandaRecalculationResult:
+    sustituciones: DemandaSustitucionesResult
+    report_path: Path
+
+
+@dataclass
+class _DemandaReportState:
+    stage: str = "lectura"
+    anio: int | None = None
+    load_started: bool = False
+    postgresql: PostgresqlLoadResult | None = None
+    sustituciones: DemandaSustitucionesResult | None = None
 
 
 def run_flow(
@@ -79,6 +100,32 @@ def run_flow(
     connection_factory: Any | None = None,
     password_provider: Any | None = None,
     confirm_callback: Any | None = None,
+) -> FlowRunResult:
+    state = _DemandaReportState() if load and config.name == "demanda" else None
+    try:
+        return _run_flow(
+            config,
+            load=load,
+            connection_factory=connection_factory,
+            password_provider=password_provider,
+            confirm_callback=confirm_callback,
+            demanda_state=state,
+        )
+    except Exception as error:
+        if state is not None:
+            _record_demanda_failure(config, state, error, manual=False)
+            error.add_note(f"Etapa de demanda: {state.stage}")
+        raise
+
+
+def _run_flow(
+    config: FlowConfig,
+    *,
+    load: bool,
+    connection_factory: Any | None,
+    password_provider: Any | None,
+    confirm_callback: Any | None,
+    demanda_state: _DemandaReportState | None,
 ) -> FlowRunResult:
     _status(config, "Iniciando pipeline")
     prepared_password: str | None = None
@@ -92,6 +139,8 @@ def run_flow(
         )
         _status(config, "Carga PostgreSQL confirmada")
     _status(config, "Resolviendo archivo de origen")
+    if demanda_state is not None:
+        demanda_state.stage = "lectura"
     source_path = resolve_source_path(config)
     _status(config, f"Leyendo archivo: {source_path}")
     frame = read_source(config)
@@ -125,6 +174,8 @@ def run_flow(
         "Transformaciones aplicadas: "
         + (", ".join(transformation_names) if transformation_names else "ninguna"),
     )
+    if demanda_state is not None:
+        demanda_state.stage = "validacion"
     validation = _validation(config)
     _status(config, "Validando columnas requeridas")
     warnings: list[str] = []
@@ -152,6 +203,8 @@ def run_flow(
         validate_flow_config(config.data, expected_name="demanda", env=config.env)
     anio_demanda = _demanda_year(config, transformed) if demanda_load else None
     if demanda_load:
+        demanda_state.anio = anio_demanda
+        demanda_state.stage = "confirmacion"
         _status(config, "Preparando carga a PostgreSQL")
         prepared_password = prepare_postgresql_load(
             config,
@@ -172,15 +225,23 @@ def run_flow(
     )
 
     _status(config, f"Escribiendo archivo procesado: {processed_path}")
+    if demanda_state is not None:
+        demanda_state.stage = "salida_procesada"
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
     postgresql_result = None
+    sustituciones_result = None
     if load:
         lock = (
             _demanda_advisory_lock(config, connection_factory, prepared_password)
             if demanda_load
             else nullcontext()
         )
+        if demanda_state is not None:
+            demanda_state.stage = "bloqueo"
         with lock:
+            if demanda_state is not None:
+                demanda_state.stage = "carga"
+                demanda_state.load_started = True
             _status(config, "Iniciando carga a PostgreSQL")
             postgresql_result = load_to_postgresql(
                 config,
@@ -191,19 +252,29 @@ def run_flow(
                 password=prepared_password,
                 confirmed=True,
             )
+            if demanda_state is not None:
+                demanda_state.postgresql = postgresql_result
             if demanda_load:
                 if postgresql_result.status != "success":
                     raise FlowRunError("La carga de demanda no finalizó satisfactoriamente")
             _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
             if demanda_load:
+                demanda_state.stage = "analisis"
                 _status(config, f"Generando sustituciones de {anio_demanda}")
-                generar_sustituciones(
+                sustituciones_result = generar_sustituciones(
                     config,
                     anio=anio_demanda,
                     connection_factory=connection_factory,
                     password=prepared_password,
                 )
+                if (
+                    not isinstance(sustituciones_result, DemandaSustitucionesResult)
+                    or sustituciones_result.estado != "success"
+                ):
+                    raise FlowRunError("El análisis de demanda no devolvió un resultado válido")
+                demanda_state.sustituciones = sustituciones_result
                 _status(config, "Sustituciones generadas")
+                demanda_state.stage = "bloqueo"
     result = FlowRunResult(
         flow=config.name,
         env=config.env,
@@ -224,14 +295,167 @@ def run_flow(
         processed_path=processed_path,
         report_path=report_path,
         postgresql=postgresql_result,
+        demanda_sustituciones=sustituciones_result,
     )
     _status(config, f"Escribiendo reporte: {report_path}")
-    report_path.write_text(
-        json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    if demanda_state is not None:
+        demanda_state.stage = "reporte"
+        _write_json_report(report_path, _report(config, result))
+    else:
+        report_path.write_text(
+            json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     _status(config, "Pipeline completado")
     return result
+
+
+def recalcular_demanda_sustituciones(
+    config: FlowConfig,
+    *,
+    anio: int,
+    connection_factory: Any | None = None,
+    password_provider: Any | None = None,
+    confirm_callback: Any | None = None,
+) -> DemandaRecalculationResult:
+    """Recalculate one year without reading or loading a source file."""
+    state = _DemandaReportState(stage="validacion")
+    try:
+        if config.name != "demanda":
+            raise FlowRunError("El recálculo solo está disponible para demanda")
+        if not isinstance(anio, int) or isinstance(anio, bool) or not 1 <= anio <= 9999:
+            raise FlowRunError("--anio debe ser un entero entre 1 y 9999")
+        state.anio = anio
+        validate_flow_config(config.data, expected_name="demanda", env=config.env)
+        schema = _postgresql_config(config)["schema"]
+        report_path = _manual_report_path(config, anio)
+        state.stage = "confirmacion"
+        confirm = confirm_callback or _default_confirm_callback
+        if not confirm(
+            f"Recalcular sustituciones en {schema}.demanda_sustituciones "
+            f"para el año {anio}; se reemplazarán los resultados de ese año."
+        ):
+            raise FlowRunError("Recálculo de sustituciones cancelado")
+        password = (password_provider or _default_password_provider)()
+        if password is None:
+            raise FlowRunError("La contraseña de PostgreSQL no está disponible")
+        state.stage = "bloqueo"
+        with _demanda_advisory_lock(config, connection_factory, password):
+            state.stage = "analisis"
+            result = generar_sustituciones(
+                config, anio=anio, connection_factory=connection_factory,
+                password=password,
+            )
+            if not isinstance(result, DemandaSustitucionesResult) or result.estado != "success":
+                raise FlowRunError("El análisis de demanda no devolvió un resultado válido")
+            state.sustituciones = result
+            state.stage = "bloqueo"
+        state.stage = "reporte"
+        _write_json_report(report_path, {
+            "flow": "demanda",
+            "env": config.env,
+            "modo": "recalculo_manual",
+            "estado_ejecucion": "success",
+            "carga_archivo_ejecutada": False,
+            "postgresql": {"status": "skipped"},
+            "demanda_sustituciones": asdict(result),
+        })
+        return DemandaRecalculationResult(result, report_path)
+    except Exception as error:
+        _record_demanda_failure(config, state, error, manual=True)
+        error.add_note(f"Etapa de recálculo: {state.stage}")
+        raise
+
+
+def _manual_report_path(config: FlowConfig, anio: int) -> Path:
+    return _output_base_dir(config) / f"demanda_sustituciones_recalculo_{anio}.json"
+
+
+def _empty_sustituciones(anio: int | None, estado: str) -> dict[str, Any]:
+    return {
+        "anio_procesado": anio,
+        "version_algoritmo": None,
+        "registros_al": None,
+        "candidatas_unicas": None,
+        "candidatas_multiples": None,
+        "sin_candidata": None,
+        "registros_agregados": None,
+        "relaciones_generadas": None,
+        "duracion_segundos": None,
+        "estado": estado,
+    }
+
+
+def _write_json_report(path: Path, report: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8")
+    except OSError as error:
+        raise FlowRunError(f"No se pudo escribir el reporte JSON: {path}") from error
+
+
+def _record_demanda_failure(
+    config: FlowConfig,
+    state: _DemandaReportState,
+    error: Exception,
+    *,
+    manual: bool,
+) -> None:
+    if manual:
+        postgresql = {"status": "skipped"}
+    elif state.postgresql is not None:
+        postgresql = _postgresql_result_report(state.postgresql)
+    else:
+        postgresql = {
+            "status": "error" if state.stage == "carga" else "skipped",
+            "rows_loaded": None,
+        }
+    substitutions = (
+        asdict(state.sustituciones) if state.sustituciones is not None
+        else _empty_sustituciones(
+            state.anio, "error" if state.stage == "analisis" else "skipped"
+        )
+    )
+    substitutions_committed = (
+        True if state.sustituciones is not None or
+        getattr(error, "demanda_sustituciones_commit_confirmed", False)
+        else None
+    )
+    report = {
+        "flow": "demanda",
+        "env": config.env,
+        "modo": "recalculo_manual" if manual else "automatico",
+        "estado_ejecucion": "error",
+        "carga_archivo_ejecutada": False if manual else state.load_started,
+        "postgresql": postgresql,
+        "demanda_sustituciones": substitutions,
+        "error": {
+            "stage": state.stage,
+            "type": type(error).__name__,
+            "commit_demanda_confirmado": (
+                True if state.postgresql and state.postgresql.status == "success"
+                else None
+            ),
+            "commit_sustituciones_confirmado": substitutions_committed,
+        },
+    }
+    try:
+        if manual:
+            path = (
+                _manual_report_path(config, state.anio) if state.anio else
+                _output_base_dir(config) / "demanda_sustituciones_recalculo_error.json"
+            )
+        else:
+            path = _output_base_dir(config) / _output_name(
+                config, "report_filename", "demanda_report.json"
+            )
+        _write_json_report(path, report)
+    except Exception as report_error:
+        error.add_note(
+            f"No se pudo escribir el reporte de error: {type(report_error).__name__}"
+        )
+        LOGGER.error("No se pudo escribir el reporte de error de demanda")
 
 
 def _current_demanda_year() -> int:
@@ -555,7 +779,7 @@ def _output_name(config: FlowConfig, key: str, default: str) -> Path:
 def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
     source = config.data.get("source", {})
     validation = _validation(config)
-    return {
+    report = {
         "flow": result.flow,
         "env": result.env,
         "source": {
@@ -593,17 +817,29 @@ def _report(config: FlowConfig, result: FlowRunResult) -> dict[str, Any]:
         ],
         "postgresql": _postgresql_report(result),
     }
+    if config.name == "demanda":
+        report["modo"] = "automatico" if result.postgresql else "procesamiento"
+        report["estado_ejecucion"] = "success"
+        report["demanda_sustituciones"] = (
+            asdict(result.demanda_sustituciones) if result.demanda_sustituciones
+            else _empty_sustituciones(None, "skipped")
+        )
+    return report
 
 
 def _postgresql_report(result: FlowRunResult) -> dict[str, Any]:
     if result.postgresql is None:
         return {"status": "skipped"}
+    return _postgresql_result_report(result.postgresql)
+
+
+def _postgresql_result_report(result: PostgresqlLoadResult) -> dict[str, Any]:
     return {
-        "status": result.postgresql.status,
-        "target_schema": result.postgresql.target_schema,
-        "target_table": result.postgresql.target_table,
-        "load_mode": result.postgresql.load_mode,
-        "source_filename": result.postgresql.source_filename,
-        "source_hash": result.postgresql.source_hash,
-        "rows_loaded": result.postgresql.rows_loaded,
+        "status": result.status,
+        "target_schema": result.target_schema,
+        "target_table": result.target_table,
+        "load_mode": result.load_mode,
+        "source_filename": result.source_filename,
+        "source_hash": result.source_hash,
+        "rows_loaded": result.rows_loaded,
     }

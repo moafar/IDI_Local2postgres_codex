@@ -230,6 +230,21 @@ def test_commit_failure_rolls_back_and_does_not_report_success(config, fake):
     assert connection.calls == ["commit", "rollback", "close"]
 
 
+def test_close_error_after_commit_preserves_commit_information(config, fake):
+    connection, factory, _ = fake
+
+    def fail_close():
+        connection.calls.append("close")
+        raise RuntimeError("close failed")
+
+    connection.close = fail_close
+    with pytest.raises(RuntimeError, match="close failed") as caught:
+        generar_sustituciones(config, anio=2026,
+                              connection_factory=factory, password="unused")
+    assert connection.calls == ["commit", "close"]
+    assert caught.value.demanda_sustituciones_commit_confirmed is True
+
+
 @pytest.mark.parametrize("contract_part", ["columns", "constraints",
                                           "primary_key_columns"])
 def test_missing_target_contract_prevents_sql(config, fake, contract_part):
