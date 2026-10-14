@@ -5,6 +5,8 @@ demanda_sustituciones_sql. Requires a pre-created result table; it performs no
 DDL, calendar authorization, locking, pipeline reporting or other ETL changes.
 Close errors after COMMIT retain the original exception and mark that COMMIT
 was confirmed, so pipeline reports cannot imply an analytical rollback.
+Displays SQL-phase progress and timings; percentages measure completed phases,
+not progress within PostgreSQL statements.
 """
 
 from __future__ import annotations
@@ -12,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
+
+from tqdm import tqdm
 
 from up_to_postgresql.config.schema import FlowConfig, validate_flow_config
 from up_to_postgresql.flows.demanda_sustituciones_sql import (
@@ -170,8 +174,28 @@ def generar_sustituciones(
             raise DemandaSustitucionesError("the connection must be transactional")
         with connection.cursor() as cursor:
             _validate_target(cursor, postgresql["schema"])
-            for name, query in queries.items():
-                cursor.execute(query, {"anio": anio} if name == "context" else None)
+            with tqdm(
+                total=len(queries), desc=f"Sustituciones {anio}",
+                unit="fase", dynamic_ncols=True,
+            ) as progress:
+                for name, query in queries.items():
+                    progress.set_postfix_str(name, refresh=True)
+                    phase_started = perf_counter()
+                    try:
+                        cursor.execute(
+                            query, {"anio": anio} if name == "context" else None
+                        )
+                    except BaseException:
+                        tqdm.write(
+                            f"[demanda_sustituciones] {name}: ERROR "
+                            f"tras {perf_counter() - phase_started:.2f} s"
+                        )
+                        raise
+                    tqdm.write(
+                        f"[demanda_sustituciones] {name}: "
+                        f"{perf_counter() - phase_started:.2f} s"
+                    )
+                    progress.update(1)
             cursor.execute(_SUMMARY_SQL)
             counts = cursor.fetchone()
             if counts is None or len(counts) != 6:
