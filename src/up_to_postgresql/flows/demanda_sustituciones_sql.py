@@ -221,6 +221,9 @@ def build_queries(schema: str) -> dict[str, str]:
                 "WHERE ordinal IS NULL OR ordinal < 1 OR ordinal > repeticiones",
             }
         ),
+        "analyze_occurrences": """
+            ANALYZE pg_temp._ds_occurrences;
+        """,
         "match": f"""
             CREATE TEMP TABLE _ds_pairs ON COMMIT DROP AS
             SELECT id_al, id_candidata, count(*) OVER (PARTITION BY id_al)
