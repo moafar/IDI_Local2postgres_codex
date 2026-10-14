@@ -1,6 +1,8 @@
 # PostgreSQL Mapping
 
-Contrato físico objetivo para la futura carga en PostgreSQL.
+Contrato de columnas que relaciona las fuentes configuradas con PostgreSQL.
+Depende de `config/flows/*.yml`; documenta el mapeo y no crea tablas ni guarda
+contraseñas o archivos de datos.
 
 ## Alcance
 
@@ -93,8 +95,8 @@ Flujo CSV real de actividad actual.
 
 Tabla de demanda.
 
-- Archivo de referencia: `data/input/test/demanda._samplexlsx.xlsx`
-- Hoja: `Demanda`
+- Archivo configurado: `data/input/test/Demanda.csv`
+- Formato: UTF-8, separador `;`, cabecera en la primera fila
 
 | orden | columna_origen | columna_postgresql | tipo_postgresql |
 | ---: | --- | --- | --- |
