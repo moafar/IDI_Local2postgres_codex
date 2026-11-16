@@ -12,7 +12,6 @@ dependencies = [
     "openpyxl>=3.1",
     "pandas>=2.0",
     "psycopg[binary]>=3.2",
-    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
