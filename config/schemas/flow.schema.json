@@ -200,6 +200,42 @@
           "description": "Columna resultante."
         }
       },
+      "if": {
+        "properties": { "name": { "const": "prestacions_pendents" } }
+      },
+      "then": {
+        "required": [
+          "periode_informe",
+          "data_tall",
+          "intervencionistes",
+          "nivell_9_fragments",
+          "nivell_9_exactes",
+          "centres"
+        ],
+        "properties": {
+          "periode_informe": {
+            "type": "string",
+            "pattern": "^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$"
+          },
+          "data_tall": { "type": "string", "format": "date" },
+          "intervencionistes": { "type": "string", "minLength": 1 },
+          "nivell_9_fragments": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "nivell_9_exactes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "centres": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
       "additionalProperties": true
     },
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import file_digest
 import json
 import logging
 from pathlib import Path
@@ -19,6 +20,7 @@ from up_to_postgresql.loading import (
 )
 from up_to_postgresql.readers import read_source
 from up_to_postgresql.source import resolve_source_path
+from up_to_postgresql.transforms import prestacions_pendents as pending
 
 
 LOGGER = logging.getLogger(__name__)
@@ -64,9 +66,54 @@ def run_flow(
     password_provider: Any | None = None,
     confirm_callback: Any | None = None,
 ) -> FlowRunResult:
+    snapshot = None
+    if config.name == pending.FLOW_NAME:
+        settings = _transformations(config)[0]
+        snapshot = {
+            "periode_informe": settings["periode_informe"],
+            "data_tall": settings["data_tall"],
+            "stage": "read",
+            "rows_published": 0,
+        }
+    try:
+        return _run_flow(
+            config, load, connection_factory, password_provider, confirm_callback, snapshot
+        )
+    except Exception as error:
+        if snapshot is None:
+            raise
+        stage = snapshot["stage"]
+        reason = (
+            str(error)
+            if isinstance(error, pending.PendingSnapshotError)
+            else f"Snapshot failed during {stage} ({type(error).__name__})."
+        )
+        report_path = _pending_report_path(config, "error")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_report(
+            report_path,
+            {
+                **snapshot,
+                "flow": config.name,
+                "env": config.env,
+                "status": "error",
+                "error_message": reason,
+            },
+        )
+        raise FlowRunError(f"{reason} Report: {report_path}") from None
+
+
+def _run_flow(
+    config: FlowConfig,
+    load: bool,
+    connection_factory: Any,
+    password_provider: Any,
+    confirm_callback: Any,
+    snapshot: dict[str, Any] | None,
+) -> FlowRunResult:
     _status(config, "Iniciando pipeline")
     prepared_password: str | None = None
-    if load:
+    if load and snapshot is None:
         _status(config, "Preparando carga a PostgreSQL")
         prepared_password = prepare_postgresql_load(
             config,
@@ -75,9 +122,30 @@ def run_flow(
         )
         _status(config, "Carga PostgreSQL confirmada")
     _status(config, "Resolviendo archivo de origen")
+    if snapshot is not None and config.data["source"].get("path") != pending.SOURCE_FILENAME:
+        raise pending.PendingSnapshotError(f"Expected source {pending.SOURCE_FILENAME}.")
     source_path = resolve_source_path(config)
     _status(config, f"Leyendo archivo: {source_path}")
+    if snapshot is not None:
+        with source_path.open("rb") as source:
+            snapshot["source_hash"] = file_digest(source, "sha256").hexdigest()
+        expected_header = [
+            item["source"]
+            for item in config.data["load"]["column_mapping"]
+            if item["source"] not in pending.DERIVED_COLUMNS
+        ]
+        records = pending.check_csv(source_path, expected_header, snapshot)
     frame = read_source(config)
+    if snapshot is not None:
+        if (
+            list(frame.columns) != expected_header
+            or len(frame) != records
+            or not isinstance(frame.index, pd.RangeIndex)
+            or frame.isna().any().any()
+        ):
+            raise pending.PendingSnapshotError("CSV reader did not preserve the expected detail.")
+        snapshot["stage"] = "validation"
+        _validate_pending_key(config, frame, snapshot)
     _status(config, f"{len(frame)} filas x {len(frame.columns)} columnas leídas")
     processing = _processing(config)
     cleaned = frame
@@ -101,7 +169,12 @@ def run_flow(
         f"{len(empty_columns_removed)} columnas eliminadas",
     )
     _status(config, "Aplicando transformaciones")
-    transformed = _project_mapped_columns(_apply_transformations(cleaned, config), config)
+    if snapshot is not None:
+        snapshot["stage"] = "transformation"
+        transformed = pending.transform(frame, _transformations(config)[0], snapshot)
+    else:
+        transformed = _apply_transformations(cleaned, config)
+    transformed = _project_mapped_columns(transformed, config)
     transformation_names = _transformation_names(config)
     _status(
         config,
@@ -139,12 +212,25 @@ def run_flow(
     report_path = output_dir / _output_name(
         config, "report_filename", f"{config.name}_report.json"
     )
+    if snapshot is not None:
+        if load:
+            snapshot["stage"] = "load_confirmation"
+            prepared_password = prepare_postgresql_load(
+                config,
+                password_provider=password_provider,
+                confirm_callback=confirm_callback,
+            )
+        else:
+            report_path = _pending_report_path(config, "preview")
+        snapshot["stage"] = "processed_output"
 
     _status(config, f"Escribiendo archivo procesado: {processed_path}")
     transformed.to_csv(processed_path, index=False, encoding="utf-8")
     postgresql_result = None
     if load:
         _status(config, "Iniciando carga a PostgreSQL")
+        if snapshot is not None:
+            snapshot["stage"] = "load"
         postgresql_result = load_to_postgresql(
             config,
             transformed,
@@ -154,6 +240,8 @@ def run_flow(
             password=prepared_password,
             confirmed=True,
         )
+        if snapshot is not None:
+            snapshot["rows_published"] = postgresql_result.rows_loaded
         _status(config, f"{postgresql_result.rows_loaded} filas cargadas en PostgreSQL")
     result = FlowRunResult(
         flow=config.name,
@@ -177,12 +265,58 @@ def run_flow(
         postgresql=postgresql_result,
     )
     _status(config, f"Escribiendo reporte: {report_path}")
-    report_path.write_text(
-        json.dumps(_report(config, result), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    report = _report(config, result)
+    if snapshot is not None:
+        snapshot["stage"] = "report"
+        report.update(snapshot, stage="completed", status="success")
+        report["steps"] = [
+            "read_source",
+            "validate_full_detail",
+            "filter_and_derive_pending_prestations",
+            "project_and_validate_output",
+            "write_processed_output",
+            *(["load_postgresql"] if load else []),
+            "write_execution_report",
+        ]
+    _write_report(report_path, report)
     _status(config, "Pipeline completado")
     return result
+
+
+def _validate_pending_key(
+    config: FlowConfig, frame: pd.DataFrame, snapshot: dict[str, Any]
+) -> None:
+    validation = _validation(config)
+    key, missing = _duplicate_key(validation, frame)
+    snapshot["duplicate_key"] = key
+    if key != pending.KEY or missing:
+        raise pending.PendingSnapshotError("Expected the complete source key.")
+    _check_required_columns(validation, frame, [])
+    key_values = frame.loc[:, list(key)]
+    duplicates = int(key_values.duplicated(keep=False).sum())
+    incomplete = int(key_values.apply(lambda col: col.str.strip().eq("")).any(axis=1).sum())
+    snapshot.update(
+        distinct_keys=len(key_values.drop_duplicates()),
+        incomplete_key_rows=incomplete,
+        duplicate_rows=duplicates,
+    )
+    if frame.empty:
+        raise pending.PendingSnapshotError("CSV contains no detail rows.")
+    if incomplete or duplicates:
+        raise pending.PendingSnapshotError(
+            f"Invalid source key: {incomplete} incomplete rows, {duplicates} duplicate rows."
+        )
+
+
+def _pending_report_path(config: FlowConfig, suffix: str) -> Path:
+    path = _output_base_dir(config) / _output_name(
+        config, "report_filename", f"{config.name}_report.json"
+    )
+    return path.with_stem(f"{path.stem}_{suffix}")
+
+
+def _write_report(path: Path, report: dict[str, Any]) -> None:
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _drop_empty(

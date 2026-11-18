@@ -3,11 +3,18 @@
 
 from __future__ import annotations
 
+from datetime import date
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Any
+
+from up_to_postgresql.transforms.prestacions_pendents import (
+    DERIVED_COLUMNS,
+    FLOW_NAME,
+    PERIOD_PATTERN,
+)
 
 
 VALID_ENVS = ("test", "prd")
@@ -72,6 +79,22 @@ def validate_flow_config(
     _validate_transformations(config.get("transformations", []))
     _validate_postgresql(config.get("postgresql", {}), resolved_env)
     _validate_load(config.get("load", {}))
+    if name == FLOW_NAME:
+        transformations = config.get("transformations")
+        if (
+            not transformations
+            or len(transformations) != 1
+            or transformations[0]["name"] != FLOW_NAME
+        ):
+            raise ConfigError(f"Flow {FLOW_NAME} requires its dedicated transformation.")
+        mapping = (config.get("load") or {}).get("column_mapping", [])
+        sources = [item["source"] for item in mapping]
+        if (
+            len(sources) != 25 + len(DERIVED_COLUMNS)
+            or len(sources) != len(set(sources))
+            or tuple(sources[25:]) != DERIVED_COLUMNS
+        ):
+            raise ConfigError(f"Flow {FLOW_NAME} requires 25 source and six derived columns.")
     return FlowConfig(name=name, env=resolved_env, data=dict(config))
 
 
@@ -155,6 +178,36 @@ def _validate_transformations(value: Any) -> None:
         name = item.get("name")
         if not isinstance(name, str) or not name:
             raise ConfigError("Each transformation requires a non-empty string 'name'.")
+        if name == FLOW_NAME:
+            _validate_pending_settings(item)
+
+
+def _validate_pending_settings(settings: Mapping[str, Any]) -> None:
+    period = settings.get("periode_informe")
+    if not isinstance(period, str) or not re.fullmatch(PERIOD_PATTERN, period):
+        raise ConfigError("prestacions_pendents.periode_informe must be YYYY-MM.")
+    cutoff = settings.get("data_tall")
+    if not isinstance(cutoff, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", cutoff):
+        raise ConfigError("prestacions_pendents.data_tall must be an ISO date.")
+    try:
+        date.fromisoformat(cutoff)
+    except ValueError:
+        raise ConfigError("prestacions_pendents.data_tall must be a valid date.") from None
+    description = settings.get("intervencionistes")
+    if not isinstance(description, str) or not description.strip():
+        raise ConfigError("prestacions_pendents.intervencionistes must be non-empty text.")
+    for key in ("nivell_9_fragments", "nivell_9_exactes"):
+        patterns = settings.get(key)
+        if not isinstance(patterns, list) or not patterns or not all(
+            isinstance(pattern, str) and pattern.strip() for pattern in patterns
+        ):
+            raise ConfigError(f"prestacions_pendents.{key} must list non-empty patterns.")
+    centres = settings.get("centres")
+    if not isinstance(centres, Mapping) or not centres or not all(
+        isinstance(code, str) and code.strip() and isinstance(label, str) and label.strip()
+        for code, label in centres.items()
+    ):
+        raise ConfigError("prestacions_pendents.centres must map codes to non-empty labels.")
 
 
 def _validate_postgresql(value: Any, env: str) -> None:
