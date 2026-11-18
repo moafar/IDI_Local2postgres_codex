@@ -1,0 +1,116 @@
+name: prestacions_pendents
+source:
+  type: csv
+  path: prestacions_pendents.csv
+  encoding: utf-8
+  delimiter: ";"
+  header_row: 2
+processing:
+  drop_empty_rows: false
+  drop_empty_columns: false
+  trim_strings: false
+validation:
+  required_columns:
+    - Centre Codi
+    - Prestació número
+  missing_columns_policy: error
+  duplicate_key:
+    - Centre Codi
+    - Prestació número
+  duplicate_policy: error
+transformations:
+  - name: prestacions_pendents
+    periode_informe: "2026-10"
+    data_tall: "2026-11-09"
+    intervencionistes: "Procediments intervencionistes"
+    nivell_9_fragments:
+      - "guia"
+      - "Tècnica de ROLL"
+      - "Radiofreqüència"
+    nivell_9_exactes:
+      - "Marcadores metálicos"
+      - "Localización pre-quirúrgica"
+      - "Marcadors post BAG"
+      - "PAAF d’adenopaties cervicals (a cegues)"
+      - "PAAF de parts toves (a cegues)"
+      - "PAAF adenopatía axil·lar"
+      - "TC osteosíntesi percutània"
+    centres:
+      AR: IDI Lleida
+      BE: IDI Metropolitana Sud
+      DT: IDI Girona
+      GT: IDI Metropolitana Nord
+      JX: IDI Tarragona
+      MA: IDI Barcelona
+      VC: "IDI Terres de l'Ebre"
+      VH: "IDI Vall d'Hebron"
+output:
+  processed_filename: prestacions_pendents_processed.csv
+  report_filename: prestacions_pendents_report.json
+load:
+  target_table: prestacions_pendents
+  load_mode: replace
+  reload_existing_hash: false
+  column_mapping:
+    - source: Any prestació (YYYY)
+      target: any_prestacio  # TEXT
+    - source: Periode prestació (YYYY-MM)
+      target: periode_prestacio  # TEXT
+    - source: Data prestació
+      target: data_prestacio  # TEXT, DD/MM/AA
+    - source: Centre Codi
+      target: centre_codi  # TEXT
+    - source: Institució corregida
+      target: institucio_corregida  # TEXT
+    - source: Prestació descripció
+      target: prestacio_descripcio  # TEXT
+    - source: Prestació nivell 9 desc
+      target: prestacio_nivell_9_descripcio  # TEXT
+    - source: Pacient (NHC)
+      target: pacient_nhc  # TEXT
+    - source: Prestació número
+      target: prestacio_numero  # TEXT
+    - source: Prestació estat codi
+      target: prestacio_estat_codi  # TEXT
+    - source: Prestació estat codi corregida
+      target: prestacio_estat_codi_corregida  # TEXT
+    - source: Diagnòstic o Seguiment
+      target: diagnostic_o_seguiment  # TEXT
+    - source: Descripció Diagnòstic
+      target: descripcio_diagnostic  # TEXT
+    - source: Prestació prioritat codi
+      target: prestacio_prioritat_codi  # TEXT
+    - source: UP Sol·licitant Entitat Corregida
+      target: up_solicitant_entitat_corregida  # TEXT
+    - source: Agrupació sol·licitant
+      target: agrupacio_solicitant  # TEXT
+    - source: Sol.licitant (agrupació per proveïdor)
+      target: solicitant_agrupacio_per_proveidor  # TEXT
+    - source: Regió sanitària desc
+      target: regio_sanitaria_descripcio  # TEXT
+    - source: UP Sol·licitant Corregida
+      target: up_solicitant_corregida  # TEXT
+    - source: UT sol·licitant desc
+      target: ut_solicitant_descripcio  # TEXT
+    - source: UT Gestora codi
+      target: ut_gestora_codi  # TEXT
+    - source: UT Gestora desc
+      target: ut_gestora_descripcio  # TEXT
+    - source: Màquina de la prestació codi
+      target: maquina_prestacio_codi  # TEXT
+    - source: Màquina de la prestació desc
+      target: maquina_prestacio_descripcio  # TEXT
+    - source: Número de prestacions pendents de realitzar
+      target: numero_prestacions_pendents  # TEXT
+    - source: Centre nom
+      target: centre_nom  # TEXT
+    - source: Període informe
+      target: periode_informe  # TEXT, YYYY-MM
+    - source: Data tall
+      target: data_tall  # TEXT, entrada ISO YYYY-MM-DD
+    - source: Mes prestació número
+      target: mes_prestacio_numero  # TEXT, 1–12
+    - source: Mes
+      target: mes  # TEXT
+    - source: Acumulat
+      target: acumulat  # TEXT
