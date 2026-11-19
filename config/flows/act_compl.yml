@@ -53,6 +53,8 @@ validation:
     - UT Gestora desc
     - UT sol·licitant codi
     - UT sol·licitant desc
+    - Diagnòstic o Seguiment
+    - Prestació prioritat codi
     - Número de prestacions
     - v_Centre Codi
     - v_Direcció Clínica
@@ -170,3 +172,7 @@ load:
       target: ut_gestora_corregida
     - source: any_revisat
       target: any_revisat
+    - source: Diagnòstic o Seguiment
+      target: diagnostic_o_seguiment
+    - source: Prestació prioritat codi
+      target: prestacio_prioritat_codi
