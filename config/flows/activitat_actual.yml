@@ -47,6 +47,8 @@ validation:
     - Temps entre ordre clínica i data de Realitazacio Informe (dies)
     - Temps entre ordre clínica i data informe (dies)
     - Temps entre prestació realitzada i data d'informe (dies)
+    - Diagnòstic o Seguiment
+    - Prestació prioritat codi
     - v_Centre Codi
     - v_Direcció Clínica
     - v_Institució corregida
@@ -160,3 +162,7 @@ load:
       target: up_solicitant_entitat_corregida
     - source: v_UT Gestora corregida
       target: ut_gestora_corregida
+    - source: Diagnòstic o Seguiment
+      target: diagnostic_o_seguiment
+    - source: Prestació prioritat codi
+      target: prestacio_prioritat_codi
